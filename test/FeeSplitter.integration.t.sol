@@ -333,7 +333,7 @@ contract FeeSplitterIntegrationTest is BaseTest, DeployFeeSplitter {
         );
     }
 
-    function testDeployScriptIntegration() public {
+    function testDeployScriptIntegration() public view {
         // This test verifies that the deploy script works correctly
         // Since setUp() already uses the deploy script, we just need to verify the deployment is correct
         assertEq(feeSplitter.TOKEN_0(), addresses.getAddress("MAMO"), "incorrect TOKEN_0 from deploy script");
