@@ -128,6 +128,8 @@ contract ERC20MoonwellMorphoStrategy is Initializable, UUPSUpgradeable, BaseStra
         uint256 compoundFee;
     }
 
+    address public constant MERKLE_PROTOCOL_DISTRIBUTOR = 0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae;
+
     /**
      * @notice Restricts function access to the backend address only
      * @dev Uses the MamoStrategyRegistry to verify the caller is the backend
@@ -315,30 +317,27 @@ contract ERC20MoonwellMorphoStrategy is Initializable, UUPSUpgradeable, BaseStra
     }
 
     /**
-     * @notice Claims rewards from a campaign on behalf of a user
+     * @notice Claims rewards from a campaign on behalf of a user on Merkle protocol
+     * @notice
      * @dev Only callable by the backend address
      * @param campaign The address of the campaign
      * @param rewardTokens The addresses of the reward tokens
      * @param rewardAmounts The amounts of the reward tokens
      * @param proofs The proofs of the reward tokens
      */
-    function claimRewards(
-        address campaign,
-        address[] calldata rewardTokens,
-        uint256[] calldata rewardAmounts,
-        bytes32[] calldata proofs
-    ) external onlyBackend {
+    function claimRewards(address[] calldata rewardTokens, uint256[] calldata rewardAmounts, bytes32[] calldata proofs)
+        external
+        onlyBackend
+    {
         require(rewardTokens.length == rewardAmounts.length, "Reward tokens and amounts length mismatch");
         require(rewardTokens.length == proofs.length, "Reward tokens and proofs length mismatch");
 
-        for (uint256 i = 0; i < rewardTokens.length; i++) {
-            address[] memory accounts = new address[](1);
-            accounts[0] = address(this);
+        address[] memory accounts = new address[](1);
+        accounts[0] = address(this);
 
-            IMerkleDistributor(campaign).claim(accounts, rewardTokens, rewardAmounts, proofs);
-        }
+        IMerkleDistributor(MERKLE_PROTOCOL_DISTRIBUTOR).claim(accounts, rewardTokens, rewardAmounts, proofs);
 
-        emit RewardsClaimed(campaign, rewardTokens, rewardAmounts);
+        emit RewardsClaimed(rewardTokens, rewardAmounts);
     }
 
     /**
