@@ -107,7 +107,7 @@ contract ERC20MoonwellMorphoStrategy is Initializable, UUPSUpgradeable, BaseStra
     event FeeRecipientUpdated(address indexed oldFeeRecipient, address indexed newFeeRecipient);
 
     // @notice Emitted when rewards are claimed
-    event RewardsClaimed(address indexed campaign, address[] rewardTokens, uint256[] rewardAmounts);
+    event RewardsClaimed(address[] rewardTokens, uint256[] rewardAmounts);
 
     // @notice Initialization parameters struct to avoid stack too deep errors
     struct InitParams {
@@ -317,10 +317,8 @@ contract ERC20MoonwellMorphoStrategy is Initializable, UUPSUpgradeable, BaseStra
     }
 
     /**
-     * @notice Claims rewards from a campaign on behalf of a user on Merkle protocol
-     * @notice
+     * @notice Claims rewards from Merkle protocol distributor on behalf of a user
      * @dev Only callable by the backend address
-     * @param campaign The address of the campaign
      * @param rewardTokens The addresses of the reward tokens
      * @param rewardAmounts The amounts of the reward tokens
      * @param proofs The proofs of the reward tokens
