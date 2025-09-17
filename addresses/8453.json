@@ -313,5 +313,10 @@
     "addr": "0x6f85D661961c9A265776E2A3CCFcdf3a542d6Da2",
     "name": "REWARDS_DISTRIBUTOR_MAMO_VIRTUALS_DEPRECATED",
     "isContract": true
+  },
+  {
+    "addr": "0xb13dff43b43c69c0cfe56d48e63eaf0e7aab543e",
+    "name": "GELATO_SENDER",
+    "isContract": true
   }
 ]

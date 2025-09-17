@@ -20,18 +20,17 @@ interface IRewardsDistributorSafeModule {
 contract DropAutomation is Ownable {
     using SafeERC20 for IERC20;
 
-    /// @dev MAMO token on Base mainnet (18 decimals)
-    IERC20 public constant MAMO_TOKEN = IERC20(0x7300B37DfdfAb110d83290A29DfB31B1740219fE);
+    /// @dev MAMO token
+    IERC20 public immutable MAMO_TOKEN;
 
-    /// @dev cbBTC token on Base mainnet (8 decimals)
-    IERC20 public constant CBBTC_TOKEN = IERC20(0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf);
+    /// @dev cbBTC token
+    IERC20 public immutable CBBTC_TOKEN;
 
     /// @dev F-MAMO Safe multisig address receiving reward tokens
-    address public constant F_MAMO_SAFE = 0xfE2ff8927EF602DDac27E314A199D16BE6177860;
+    address public immutable F_MAMO_SAFE;
 
     /// @dev Safe module responsible for staging reward distributions
-    IRewardsDistributorSafeModule public constant SAFE_REWARDS_DISTRIBUTOR_MODULE =
-        IRewardsDistributorSafeModule(0x9Df761AEB0D09ed631F336565806fE26D65C470b);
+    IRewardsDistributorSafeModule public immutable SAFE_REWARDS_DISTRIBUTOR_MODULE;
 
     /// @dev Aerodrome CL router used to swap earned rewards into MAMO
     ISwapRouter private constant AERODROME_CL_ROUTER = ISwapRouter(0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5);
@@ -55,7 +54,6 @@ contract DropAutomation is Ownable {
     uint256 public maxSlippageBps;
 
     uint256 private constant BPS_DENOMINATOR = 10_000;
-    int24 private constant CL_TICK_SPACING = 200;
     uint256 private constant MAX_SLIPPAGE_CAP_BPS = 500; // 5%
 
     event DropCreated(uint256 mamoAmount, uint256 cbBtcAmount);
@@ -76,10 +74,26 @@ contract DropAutomation is Ownable {
         _;
     }
 
-    constructor(address owner_, address dedicatedMsgSender_) Ownable(owner_) {
+    constructor(
+        address owner_,
+        address dedicatedMsgSender_,
+        address mamoToken_,
+        address cbBtcToken_,
+        address fMamoSafe_,
+        address safeRewardsDistributorModule_
+    ) Ownable(owner_) {
         require(owner_ != address(0), "Invalid owner");
         require(dedicatedMsgSender_ != address(0), "Invalid dedicated sender");
+        require(mamoToken_ != address(0), "Invalid MAMO token");
+        require(cbBtcToken_ != address(0), "Invalid cbBTC token");
+        require(fMamoSafe_ != address(0), "Invalid F-MAMO safe");
+        require(safeRewardsDistributorModule_ != address(0), "Invalid rewards module");
+
         dedicatedMsgSender = dedicatedMsgSender_;
+        MAMO_TOKEN = IERC20(mamoToken_);
+        CBBTC_TOKEN = IERC20(cbBtcToken_);
+        F_MAMO_SAFE = fMamoSafe_;
+        SAFE_REWARDS_DISTRIBUTOR_MODULE = IRewardsDistributorSafeModule(safeRewardsDistributorModule_);
         maxSlippageBps = 500; // default 5%
     }
 
@@ -197,9 +211,7 @@ contract DropAutomation is Ownable {
             IERC20(token).forceApprove(address(AERODROME_CL_ROUTER), amountIn);
 
             int24 tickSpacing = swapTickSpacing[token];
-            if (tickSpacing == 0) {
-                tickSpacing = CL_TICK_SPACING; // Default to 200 if not set
-            }
+            require(tickSpacing > 0, "Tick spacing not configured");
 
             IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
                 tokenIn: token,
@@ -241,11 +253,12 @@ contract DropAutomation is Ownable {
     function _swapMamoToCbBtc(uint256 amountIn) internal {
         MAMO_TOKEN.forceApprove(address(AERODROME_CL_ROUTER), amountIn);
 
+        // MAMO/cbBTC pool uses 200 tick spacing
         IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
             tokenIn: address(MAMO_TOKEN),
             tokenOut: address(CBBTC_TOKEN),
             amountIn: amountIn,
-            tickSpacing: CL_TICK_SPACING,
+            tickSpacing: 200,
             sqrtPriceLimitX96: 0
         });
 
@@ -258,7 +271,7 @@ contract DropAutomation is Ownable {
         ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
             tokenIn: address(MAMO_TOKEN),
             tokenOut: address(CBBTC_TOKEN),
-            tickSpacing: CL_TICK_SPACING,
+            tickSpacing: 200,
             recipient: address(this),
             deadline: block.timestamp,
             amountIn: amountIn,

@@ -30,10 +30,24 @@ contract DropAutomationIntegrationTest is BaseTest {
     address internal constant EDGE_TOKEN = 0xED6E000dEF95780fb89734c07EE2ce9F6dcAf110;
     address internal constant VIRTUALS_TOKEN = 0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b;
 
+    // Contract addresses needed for constructor
+    address internal constant MAMO_TOKEN = 0x7300B37DfdfAb110d83290A29DfB31B1740219fE;
+    address internal constant cbBTC_TOKEN = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
+    address internal constant F_MAMO_SAFE = 0xfE2ff8927EF602DDac27E314A199D16BE6177860;
+    address internal constant SAFE_REWARDS_DISTRIBUTOR_MODULE = 0x9Df761AEB0D09ed631F336565806fE26D65C470b;
+
     function setUp() public override {
         super.setUp();
 
-        dropAutomation = new DropAutomation(address(this), address(this));
+        // Deploy with all required addresses
+        dropAutomation = new DropAutomation(
+            address(this), // owner
+            address(this), // dedicatedMsgSender
+            MAMO_TOKEN,
+            cbBTC_TOKEN,
+            F_MAMO_SAFE,
+            SAFE_REWARDS_DISTRIBUTOR_MODULE
+        );
 
         mamoToken = IERC20(addresses.getAddress("MAMO"));
         cbBtcToken = IERC20(addresses.getAddress("cbBTC"));
