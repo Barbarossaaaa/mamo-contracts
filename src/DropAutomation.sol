@@ -54,7 +54,10 @@ contract DropAutomation is Ownable {
     uint256 public maxSlippageBps;
 
     uint256 private constant BPS_DENOMINATOR = 10_000;
-    uint256 private constant MAX_SLIPPAGE_CAP_BPS = 500; // 5%
+    uint256 private constant MAX_SLIPPAGE_CAP_BPS = 500; // 5% maximum allowed slippage
+    uint256 private constant DEFAULT_SLIPPAGE_BPS = 100; // 1% default slippage
+    uint256 private constant SWAP_DEADLINE_BUFFER = 300; // 5 minutes deadline buffer for MEV protection
+    int24 private constant MAMO_CBBTC_TICK_SPACING = 200; // Tick spacing for MAMO/cbBTC CL pool
 
     event DropCreated(uint256 mamoAmount, uint256 cbBtcAmount);
     event DedicatedMsgSenderUpdated(address indexed oldSender, address indexed newSender);
@@ -94,7 +97,7 @@ contract DropAutomation is Ownable {
         CBBTC_TOKEN = IERC20(cbBtcToken_);
         F_MAMO_SAFE = fMamoSafe_;
         SAFE_REWARDS_DISTRIBUTOR_MODULE = IRewardsDistributorSafeModule(safeRewardsDistributorModule_);
-        maxSlippageBps = 500; // default 5%
+        maxSlippageBps = DEFAULT_SLIPPAGE_BPS;
     }
 
     /**
@@ -109,7 +112,7 @@ contract DropAutomation is Ownable {
      * @dev Executes earn cycle, swaps configured tokens to MAMO, and forwards rewards to the Safe
      */
     function createDrop() external onlyDedicatedMsgSender {
-        _swapTokensForCbBtc();
+        _swapTokensToMamoAndCbBtc();
 
         uint256 mamoBalance = MAMO_TOKEN.balanceOf(address(this));
         uint256 cbBtcBalance = CBBTC_TOKEN.balanceOf(address(this));
@@ -199,7 +202,7 @@ contract DropAutomation is Ownable {
         IERC20(token).safeTransfer(to, amount);
     }
 
-    function _swapTokensForCbBtc() internal {
+    function _swapTokensToMamoAndCbBtc() internal {
         uint256 length = swapTokens.length;
         for (uint256 i = 0; i < length; i++) {
             address token = swapTokens[i];
@@ -232,7 +235,7 @@ contract DropAutomation is Ownable {
                 tokenOut: address(MAMO_TOKEN),
                 tickSpacing: tickSpacing,
                 recipient: address(this),
-                deadline: block.timestamp,
+                deadline: block.timestamp + SWAP_DEADLINE_BUFFER,
                 amountIn: amountIn,
                 amountOutMinimum: minAmountOut,
                 sqrtPriceLimitX96: 0
@@ -253,12 +256,11 @@ contract DropAutomation is Ownable {
     function _swapMamoToCbBtc(uint256 amountIn) internal {
         MAMO_TOKEN.forceApprove(address(AERODROME_CL_ROUTER), amountIn);
 
-        // MAMO/cbBTC pool uses 200 tick spacing
         IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
             tokenIn: address(MAMO_TOKEN),
             tokenOut: address(CBBTC_TOKEN),
             amountIn: amountIn,
-            tickSpacing: 200,
+            tickSpacing: MAMO_CBBTC_TICK_SPACING,
             sqrtPriceLimitX96: 0
         });
 
@@ -271,9 +273,9 @@ contract DropAutomation is Ownable {
         ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
             tokenIn: address(MAMO_TOKEN),
             tokenOut: address(CBBTC_TOKEN),
-            tickSpacing: 200,
+            tickSpacing: MAMO_CBBTC_TICK_SPACING,
             recipient: address(this),
-            deadline: block.timestamp,
+            deadline: block.timestamp + SWAP_DEADLINE_BUFFER,
             amountIn: amountIn,
             amountOutMinimum: minAmountOut,
             sqrtPriceLimitX96: 0

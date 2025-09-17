@@ -79,7 +79,7 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         );
         assertEq(dropAutomation.dedicatedMsgSender(), dedicatedSender, "incorrect dedicated sender");
         assertEq(dropAutomation.owner(), owner, "incorrect owner");
-        assertEq(dropAutomation.maxSlippageBps(), 500, "incorrect default slippage");
+        assertEq(dropAutomation.maxSlippageBps(), 100, "incorrect default slippage");
     }
 
     function testOwnerFunctions() public {
@@ -94,7 +94,7 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
 
         // Test setMaxSlippageBps
         vm.expectEmit(false, false, false, true);
-        emit MaxSlippageUpdated(500, 300);
+        emit MaxSlippageUpdated(100, 300);
 
         vm.prank(owner);
         dropAutomation.setMaxSlippageBps(300);
