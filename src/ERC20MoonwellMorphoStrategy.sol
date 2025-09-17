@@ -20,7 +20,7 @@ interface IMerkleDistributor {
         address[] calldata accounts,
         address[] calldata rewardTokens,
         uint256[] calldata rewardAmounts,
-        bytes32[] calldata proofs
+        bytes32[][] calldata proofs
     ) external;
 }
 
@@ -323,10 +323,11 @@ contract ERC20MoonwellMorphoStrategy is Initializable, UUPSUpgradeable, BaseStra
      * @param rewardAmounts The amounts of the reward tokens
      * @param proofs The proofs of the reward tokens
      */
-    function claimRewards(address[] calldata rewardTokens, uint256[] calldata rewardAmounts, bytes32[] calldata proofs)
-        external
-        onlyBackend
-    {
+    function claimRewards(
+        address[] calldata rewardTokens,
+        uint256[] calldata rewardAmounts,
+        bytes32[][] calldata proofs
+    ) external onlyBackend {
         require(rewardTokens.length == rewardAmounts.length, "Reward tokens and amounts length mismatch");
         require(rewardTokens.length == proofs.length, "Reward tokens and proofs length mismatch");
 
