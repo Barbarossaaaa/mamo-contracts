@@ -200,11 +200,11 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         dropAutomation.addSwapToken(address(0), 200);
 
         vm.prank(owner);
-        vm.expectRevert("Token already MAMO");
+        vm.expectRevert("MAMO excluded");
         dropAutomation.addSwapToken(address(mamoToken), 200);
 
         vm.prank(owner);
-        vm.expectRevert("cbBTC excluded");
+        vm.expectRevert("CBBTC excluded");
         dropAutomation.addSwapToken(address(cbBtcToken), 200);
 
         // Test adding duplicate token

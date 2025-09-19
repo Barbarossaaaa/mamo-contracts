@@ -8,7 +8,15 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IQuoter} from "@interfaces/IQuoter.sol";
 import {ISwapRouter} from "@interfaces/ISwapRouter.sol";
 
+/**
+ * @notice Interface for the rewards distributor safe module
+ */
 interface IRewardsDistributorSafeModule {
+    /**
+     * @notice Adds reward amounts to be distributed
+     * @param amountToken1 Amount of MAMO tokens to distribute
+     * @param amountToken2 Amount of cbBTC tokens to distribute
+     */
     function addRewards(uint256 amountToken1, uint256 amountToken2) external;
 }
 
@@ -33,10 +41,10 @@ contract DropAutomation is Ownable {
     IRewardsDistributorSafeModule public immutable SAFE_REWARDS_DISTRIBUTOR_MODULE;
 
     /// @dev Aerodrome CL router used to swap earned rewards into MAMO
-    ISwapRouter private constant AERODROME_CL_ROUTER = ISwapRouter(0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5);
+    ISwapRouter public immutable AERODROME_CL_ROUTER;
 
     /// @dev Aerodrome quoter used to fetch swap estimates for slippage protection
-    IQuoter private constant AERODROME_QUOTER = IQuoter(0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0);
+    IQuoter public immutable AERODROME_QUOTER;
 
     /// @notice Address authorized to trigger reward drops
     address public dedicatedMsgSender;
@@ -70,6 +78,10 @@ contract DropAutomation is Ownable {
     error NotDedicatedSender();
     error InvalidSlippage();
 
+    /**
+     * @notice Restricts function access to the dedicated message sender
+     * @dev Reverts with NotDedicatedSender if called by any other address
+     */
     modifier onlyDedicatedMsgSender() {
         if (msg.sender != dedicatedMsgSender) {
             revert NotDedicatedSender();
@@ -77,13 +89,26 @@ contract DropAutomation is Ownable {
         _;
     }
 
+    /**
+     * @notice Initializes the DropAutomation contract
+     * @param owner_ Address of the contract owner
+     * @param dedicatedMsgSender_ Address authorized to trigger reward drops
+     * @param mamoToken_ Address of the MAMO token
+     * @param cbBtcToken_ Address of the cbBTC token
+     * @param fMamoSafe_ Address of the F-MAMO Safe multisig
+     * @param safeRewardsDistributorModule_ Address of the rewards distributor module
+     * @param aerodromeRouter_ Address of the Aerodrome CL swap router
+     * @param aerodromeQuoter_ Address of the Aerodrome quoter for price estimates
+     */
     constructor(
         address owner_,
         address dedicatedMsgSender_,
         address mamoToken_,
         address cbBtcToken_,
         address fMamoSafe_,
-        address safeRewardsDistributorModule_
+        address safeRewardsDistributorModule_,
+        address aerodromeRouter_,
+        address aerodromeQuoter_
     ) Ownable(owner_) {
         require(owner_ != address(0), "Invalid owner");
         require(dedicatedMsgSender_ != address(0), "Invalid dedicated sender");
@@ -91,17 +116,22 @@ contract DropAutomation is Ownable {
         require(cbBtcToken_ != address(0), "Invalid cbBTC token");
         require(fMamoSafe_ != address(0), "Invalid F-MAMO safe");
         require(safeRewardsDistributorModule_ != address(0), "Invalid rewards module");
+        require(aerodromeRouter_ != address(0), "Invalid Aerodrome router");
+        require(aerodromeQuoter_ != address(0), "Invalid Aerodrome quoter");
 
         dedicatedMsgSender = dedicatedMsgSender_;
         MAMO_TOKEN = IERC20(mamoToken_);
         CBBTC_TOKEN = IERC20(cbBtcToken_);
         F_MAMO_SAFE = fMamoSafe_;
         SAFE_REWARDS_DISTRIBUTOR_MODULE = IRewardsDistributorSafeModule(safeRewardsDistributorModule_);
+        AERODROME_CL_ROUTER = ISwapRouter(aerodromeRouter_);
+        AERODROME_QUOTER = IQuoter(aerodromeQuoter_);
         maxSlippageBps = DEFAULT_SLIPPAGE_BPS;
     }
 
     /**
      * @notice Returns the list of tokens configured for MAMO swaps
+     * @return Array of token addresses that will be swapped to MAMO
      */
     function getSwapTokens() external view returns (address[] memory) {
         return swapTokens;
@@ -132,10 +162,16 @@ contract DropAutomation is Ownable {
         emit DropCreated(mamoBalance, cbBtcBalance);
     }
 
+    /**
+     * @notice Adds a new token to the swap list
+     * @param token Address of the token to add
+     * @param tickSpacing Tick spacing for the token's pool with MAMO
+     * @dev Only callable by owner. Token must not be MAMO, cbBTC, or already added
+     */
     function addSwapToken(address token, int24 tickSpacing) external onlyOwner {
         require(token != address(0), "Invalid token");
-        require(token != address(MAMO_TOKEN), "Token already MAMO");
-        require(token != address(CBBTC_TOKEN), "cbBTC excluded");
+        require(token != address(MAMO_TOKEN), "MAMO excluded");
+        require(token != address(CBBTC_TOKEN), "CBBTC excluded");
         require(!isSwapToken[token], "Token already added");
         require(tickSpacing > 0, "Invalid tick spacing");
 
@@ -146,6 +182,12 @@ contract DropAutomation is Ownable {
         emit SwapTokenAdded(token, tickSpacing);
     }
 
+    /**
+     * @notice Updates the tick spacing for a configured swap token
+     * @param token Address of the token to update
+     * @param tickSpacing New tick spacing for the token's pool with MAMO
+     * @dev Only callable by owner. Token must already be configured
+     */
     function setSwapTickSpacing(address token, int24 tickSpacing) external onlyOwner {
         require(isSwapToken[token], "Token not configured");
         require(tickSpacing > 0, "Invalid tick spacing");
@@ -153,6 +195,11 @@ contract DropAutomation is Ownable {
         emit SwapRouteUpdated(token, tickSpacing);
     }
 
+    /**
+     * @notice Removes a token from the swap list
+     * @param token Address of the token to remove
+     * @dev Only callable by owner. Token must be currently configured
+     */
     function removeSwapToken(address token) external onlyOwner {
         require(isSwapToken[token], "Token not configured");
 
@@ -181,6 +228,11 @@ contract DropAutomation is Ownable {
         dedicatedMsgSender = newSender;
     }
 
+    /**
+     * @notice Updates the maximum allowed slippage for swaps
+     * @param newSlippageBps New slippage tolerance in basis points (1-500)
+     * @dev Only callable by owner. Must be between 1 and 500 bps (0.01% - 5%)
+     */
     function setMaxSlippageBps(uint256 newSlippageBps) external onlyOwner {
         if (newSlippageBps == 0 || newSlippageBps > MAX_SLIPPAGE_CAP_BPS) {
             revert InvalidSlippage();
@@ -202,6 +254,10 @@ contract DropAutomation is Ownable {
         IERC20(token).safeTransfer(to, amount);
     }
 
+    /**
+     * @notice Swaps all configured tokens to MAMO and then to cbBTC
+     * @dev Iterates through swap tokens, swaps each to MAMO, then swaps half to cbBTC
+     */
     function _swapTokensToMamoAndCbBtc() internal {
         uint256 length = swapTokens.length;
         for (uint256 i = 0; i < length; i++) {
@@ -247,12 +303,15 @@ contract DropAutomation is Ownable {
 
             emit TokensSwapped(token, amountIn, amountOut);
 
-            if (amountOut > 0) {
-                _swapMamoToCbBtc(amountOut);
-            }
+            _swapMamoToCbBtc(amountOut);
         }
     }
 
+    /**
+     * @notice Swaps MAMO tokens to cbBTC
+     * @param amountIn Amount of MAMO tokens to swap
+     * @dev Uses Aerodrome CL router with slippage protection
+     */
     function _swapMamoToCbBtc(uint256 amountIn) internal {
         MAMO_TOKEN.forceApprove(address(AERODROME_CL_ROUTER), amountIn);
 

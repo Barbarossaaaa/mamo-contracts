@@ -44,10 +44,19 @@ contract DeployDropAutomation is Script {
         address cbBtcToken = addresses.getAddress("cbBTC");
         address fMamoSafe = addresses.getAddress("F-MAMO");
         address safeRewardsDistributorModule = addresses.getAddress("REWARDS_DISTRIBUTOR_MAMO_CBBTC");
+        address aerodromeRouter = addresses.getAddress("AERODROME_ROUTER");
+        address aerodromeQuoter = addresses.getAddress("AERODROME_QUOTER");
 
         // Deploy the DropAutomation
         DropAutomation dropAutomation = new DropAutomation(
-            owner, dedicatedMsgSender, mamoToken, cbBtcToken, fMamoSafe, safeRewardsDistributorModule
+            owner,
+            dedicatedMsgSender,
+            mamoToken,
+            cbBtcToken,
+            fMamoSafe,
+            safeRewardsDistributorModule,
+            aerodromeRouter,
+            aerodromeQuoter
         );
 
         console.log("DropAutomation deployed at:", address(dropAutomation));
@@ -57,6 +66,8 @@ contract DeployDropAutomation is Script {
         console.log("  cbBTC Token:", cbBtcToken);
         console.log("  F-MAMO Safe:", fMamoSafe);
         console.log("  Safe Rewards Module:", safeRewardsDistributorModule);
+        console.log("  Aerodrome Router:", aerodromeRouter);
+        console.log("  Aerodrome Quoter:", aerodromeQuoter);
 
         return address(dropAutomation);
     }
