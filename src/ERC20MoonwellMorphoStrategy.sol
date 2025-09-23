@@ -331,8 +331,10 @@ contract ERC20MoonwellMorphoStrategy is Initializable, UUPSUpgradeable, BaseStra
         require(rewardTokens.length == rewardAmounts.length, "Reward tokens and amounts length mismatch");
         require(rewardTokens.length == proofs.length, "Reward tokens and proofs length mismatch");
 
-        address[] memory accounts = new address[](1);
-        accounts[0] = address(this);
+        address[] memory accounts = new address[](rewardTokens.length);
+        for (uint256 i = 0; i < rewardTokens.length; i++) {
+            accounts[i] = address(this);
+        }
 
         IMerkleDistributor(MERKLE_PROTOCOL_DISTRIBUTOR).claim(accounts, rewardTokens, rewardAmounts, proofs);
 

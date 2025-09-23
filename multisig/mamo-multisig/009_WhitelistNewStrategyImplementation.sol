@@ -5,6 +5,8 @@ import {ERC20MoonwellMorphoStrategy} from "@contracts/ERC20MoonwellMorphoStrateg
 import {MamoStrategyRegistry} from "@contracts/MamoStrategyRegistry.sol";
 import {Addresses} from "@fps/addresses/Addresses.sol";
 import {MultisigProposal} from "@fps/src/proposals/MultisigProposal.sol";
+import {DeployAssetConfig} from "@script/DeployAssetConfig.sol";
+import {StrategyFactoryDeployer} from "@script/StrategyFactoryDeployer.s.sol";
 
 /**
  * @title WhitelistNewStrategyImplementation
@@ -14,6 +16,9 @@ import {MultisigProposal} from "@fps/src/proposals/MultisigProposal.sol";
  */
 contract WhitelistNewStrategyImplementation is MultisigProposal {
     uint256 public constant STRATEGY_TYPE_ID = 1; // Token type 1 for USDC/cbBTC strategies
+    DeployAssetConfig public immutable deployAssetConfigBtc;
+    DeployAssetConfig public immutable deployAssetConfigUsdc;
+    StrategyFactoryDeployer public immutable strategyFactoryDeployer;
 
     constructor() {
         // Initialize addresses
@@ -21,6 +26,17 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
         uint256[] memory chainIds = new uint256[](1);
         chainIds[0] = block.chainid;
         addresses = new Addresses(addressesFolderPath, chainIds);
+
+        // Load asset configurations
+        deployAssetConfigBtc = new DeployAssetConfig("./config/strategies/cbBTCStrategyConfig.json");
+        vm.makePersistent(address(deployAssetConfigBtc));
+
+        deployAssetConfigUsdc = new DeployAssetConfig("./config/strategies/USDCStrategyConfig.json");
+        vm.makePersistent(address(deployAssetConfigUsdc));
+
+        // Initialize deployer contracts
+        strategyFactoryDeployer = new StrategyFactoryDeployer();
+        vm.makePersistent(address(strategyFactoryDeployer));
     }
 
     function name() public pure override returns (string memory) {
@@ -32,11 +48,23 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
     }
 
     function deploy() public override {
+        address deployer = addresses.getAddress("DEPLOYER_EOA");
+        vm.startBroadcast(deployer);
+
         // Deploy new strategy implementation
         address newImplementation = address(new ERC20MoonwellMorphoStrategy());
+        vm.stopBroadcast();
 
         // Store the new implementation address
-        addresses.addAddress("NEW_STRATEGY_IMPLEMENTATION", newImplementation, true);
+        addresses.addAddress("MOONWELL_MORPHO_STRATEGY_IMPL", newImplementation, true);
+
+        // Deploy cbBTC strategy factory
+        DeployAssetConfig.Config memory configBtc = deployAssetConfigBtc.getConfig();
+        strategyFactoryDeployer.deployStrategyFactory(addresses, configBtc, deployer);
+
+        // Deploy USDC strategy factory
+        DeployAssetConfig.Config memory configUsdc = deployAssetConfigUsdc.getConfig();
+        strategyFactoryDeployer.deployStrategyFactory(addresses, configUsdc, deployer);
     }
 
     function build() public override buildModifier(addresses.getAddress("MAMO_MULTISIG")) {
@@ -44,7 +72,7 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
         MamoStrategyRegistry registry = MamoStrategyRegistry(addresses.getAddress("MAMO_STRATEGY_REGISTRY"));
 
         // Get the new implementation address
-        address newImplementation = addresses.getAddress("NEW_STRATEGY_IMPLEMENTATION");
+        address newImplementation = addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL");
 
         // Whitelist the new implementation for strategy type ID 1
         // This will update latestImplementationById[1] to point to the new implementation

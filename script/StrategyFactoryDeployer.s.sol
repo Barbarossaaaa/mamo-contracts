@@ -91,8 +91,14 @@ contract StrategyFactoryDeployer is Script {
         // Check if the factory address already exists
         string memory factoryName = "USDC_STRATEGY_FACTORY";
         if (addresses.isAddressSet(factoryName)) {
+            // Save old address
+            address oldAddress = addresses.getAddress(factoryName);
+
             // Update the existing address
             addresses.changeAddress(factoryName, address(factory), true);
+
+            // Add old address with _DEPRECATED suffix
+            addresses.addAddress(string(abi.encodePacked(factoryName, "_DEPRECATED")), oldAddress, true);
         } else {
             // Add the factory address to the addresses contract
             addresses.addAddress(factoryName, address(factory), true);
@@ -146,8 +152,14 @@ contract StrategyFactoryDeployer is Script {
         // Check if the factory address already exists
         string memory factoryName = string(abi.encodePacked(assetConfig.token, "_STRATEGY_FACTORY"));
         if (addresses.isAddressSet(factoryName)) {
+            // Save old address
+            address oldAddress = addresses.getAddress(factoryName);
+
             // Update the existing address
             addresses.changeAddress(factoryName, address(factory), true);
+
+            // Add old address with _DEPRECATED suffix
+            addresses.addAddress(string(abi.encodePacked(factoryName, "_DEPRECATED")), oldAddress, true);
         } else {
             // Add the factory address to the addresses contract
             addresses.addAddress(factoryName, address(factory), true);
