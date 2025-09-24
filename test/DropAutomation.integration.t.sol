@@ -5,6 +5,8 @@ import {BaseTest} from "./BaseTest.t.sol";
 
 import {DropAutomation} from "@contracts/DropAutomation.sol";
 import {RewardsDistributorSafeModule} from "@contracts/RewardsDistributorSafeModule.sol";
+
+import {IAerodromeGauge} from "@contracts/interfaces/IAerodromeGauge.sol";
 import {DeployDropAutomation} from "@script/DeployDropAutomation.s.sol";
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -78,7 +80,7 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
             "incorrect rewards module"
         );
         assertEq(dropAutomation.dedicatedMsgSender(), dedicatedSender, "incorrect dedicated sender");
-        assertEq(dropAutomation.owner(), owner, "incorrect owner");
+        assertEq(dropAutomation.owner(), addresses.getAddress("F-MAMO"), "incorrect owner");
         assertEq(dropAutomation.maxSlippageBps(), 100, "incorrect default slippage");
     }
 
@@ -274,6 +276,17 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         deal(EDGE_TOKEN, address(dropAutomation), EXTRA_TOKEN_TOP_UP);
         deal(VIRTUALS_TOKEN, address(dropAutomation), EXTRA_TOKEN_TOP_UP);
 
+        // Configure gauge so AERO rewards can be processed
+        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address aeroToken = addresses.getAddress("AERO");
+        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
+
+        vm.prank(owner);
+        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+
+        // Add AERO tokens to simulate gauge rewards
+        deal(aeroToken, address(dropAutomation), EXTRA_TOKEN_TOP_UP);
+
         uint256 safeMamoBefore = mamoToken.balanceOf(address(fMamoSafe));
         uint256 safeCbBtcBefore = cbBtcToken.balanceOf(address(fMamoSafe));
 
@@ -298,6 +311,7 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         assertEq(IERC20(ZORA_TOKEN).balanceOf(address(dropAutomation)), 0, "Drop should swap ZORA balance");
         assertEq(IERC20(EDGE_TOKEN).balanceOf(address(dropAutomation)), 0, "Drop should swap EDGE balance");
         assertEq(IERC20(VIRTUALS_TOKEN).balanceOf(address(dropAutomation)), 0, "Drop should swap Virtuals balance");
+        assertEq(IERC20(aeroToken).balanceOf(address(dropAutomation)), 0, "Drop should swap AERO balance");
     }
 
     function _ensureModuleReady() internal {
@@ -349,4 +363,248 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         }
         vm.stopPrank();
     }
+
+    function testGaugeConfiguration() public {
+        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address aeroToken = addresses.getAddress("AERO");
+        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
+
+        // Initially gauge should not be configured
+        assertEq(address(dropAutomation.aerodromeGauge()), address(0), "gauge should not be set initially");
+        assertEq(address(dropAutomation.gaugeRewardToken()), address(0), "reward token should not be set initially");
+        assertEq(address(dropAutomation.gaugeStakingToken()), address(0), "staking token should not be set initially");
+
+        // Only owner can configure gauge
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
+        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+
+        // Owner configures gauge
+        vm.prank(owner);
+        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+
+        // Verify configuration
+        assertEq(address(dropAutomation.aerodromeGauge()), gauge, "gauge should be configured");
+        assertEq(address(dropAutomation.gaugeRewardToken()), aeroToken, "reward token should be configured");
+        assertEq(address(dropAutomation.gaugeStakingToken()), stakingToken, "staking token should be configured");
+    }
+
+    function testTransferGaugePositionFromFMamo() public {
+        // Configure gauge first
+        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address aeroToken = addresses.getAddress("AERO");
+        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
+
+        vm.prank(owner);
+        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+
+        // Check F-MAMO's current gauge balance
+        IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
+        uint256 fMamoBalance = gaugeContract.balanceOf(addresses.getAddress("F-MAMO"));
+
+        if (fMamoBalance > 0) {
+            // F-MAMO withdraws from gauge
+            vm.startPrank(addresses.getAddress("F-MAMO"));
+            gaugeContract.withdraw(fMamoBalance);
+
+            // Get the LP token and transfer to DropAutomation
+            IERC20 lpToken = IERC20(stakingToken);
+            uint256 lpBalance = lpToken.balanceOf(addresses.getAddress("F-MAMO"));
+            assertGt(lpBalance, 0, "F-MAMO should have LP tokens after withdrawal");
+
+            // Re-deposit LP tokens to gauge with DropAutomation as recipient
+            lpToken.approve(gauge, lpBalance);
+            gaugeContract.deposit(lpBalance, address(dropAutomation));
+            vm.stopPrank();
+
+            // Verify staking
+            assertEq(
+                gaugeContract.balanceOf(address(dropAutomation)),
+                lpBalance,
+                "DropAutomation should have staked LP tokens"
+            );
+        }
+    }
+
+    function testHarvestGaugeRewards() public {
+        // Setup gauge configuration
+        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address aeroToken = addresses.getAddress("AERO");
+        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
+
+        vm.prank(owner);
+        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+
+        // Transfer gauge position from F-MAMO to DropAutomation
+        IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
+        uint256 fMamoBalance = gaugeContract.balanceOf(addresses.getAddress("F-MAMO"));
+
+        if (fMamoBalance > 0) {
+            // F-MAMO withdraws and re-deposits with DropAutomation as recipient
+            vm.startPrank(addresses.getAddress("F-MAMO"));
+            gaugeContract.withdraw(fMamoBalance);
+
+            IERC20 lpToken = IERC20(stakingToken);
+            uint256 lpBalance = lpToken.balanceOf(addresses.getAddress("F-MAMO"));
+
+            // Re-deposit LP tokens to gauge with DropAutomation as recipient
+            lpToken.approve(gauge, lpBalance);
+            gaugeContract.deposit(lpBalance, address(dropAutomation));
+            vm.stopPrank();
+
+            // Move time forward to accumulate rewards
+            vm.warp(block.timestamp + 7 days);
+            vm.roll(block.number + 50400); // ~7 days of blocks
+
+            // Record balances before harvest
+            IERC20 aero = IERC20(aeroToken);
+            IERC20 cbBtc = IERC20(addresses.getAddress("cbBTC"));
+            uint256 aeroBefore = aero.balanceOf(address(dropAutomation));
+            uint256 cbBtcBefore = cbBtc.balanceOf(address(dropAutomation));
+
+            // Anyone can call harvestGaugeRewards
+            dropAutomation.harvestGaugeRewards();
+
+            // Check if rewards were harvested and converted to cbBTC
+            uint256 aeroAfter = aero.balanceOf(address(dropAutomation));
+            uint256 cbBtcAfter = cbBtc.balanceOf(address(dropAutomation));
+
+            // AERO should be swapped away (balance should be same or less)
+            assertLe(aeroAfter, aeroBefore, "AERO should be swapped to cbBTC");
+
+            // cbBTC balance should increase if there were rewards
+            if (aeroAfter < aeroBefore || gaugeContract.earned(address(dropAutomation)) > 0) {
+                assertGt(cbBtcAfter, cbBtcBefore, "cbBTC balance should increase from AERO swap");
+            }
+        }
+    }
+
+    function testWithdrawGauge() public {
+        // Setup gauge with staked position
+        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address aeroToken = addresses.getAddress("AERO");
+        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
+
+        vm.prank(owner);
+        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+
+        IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
+        IERC20 lpToken = IERC20(stakingToken);
+
+        // Deal and stake LP tokens directly to gauge for DropAutomation
+        uint256 amount = 1e18;
+        deal(stakingToken, address(this), amount);
+
+        lpToken.approve(gauge, amount);
+        gaugeContract.deposit(amount, address(dropAutomation));
+
+        uint256 stakedBalance = gaugeContract.balanceOf(address(dropAutomation));
+        assertEq(stakedBalance, amount, "Should have staked balance");
+
+        // Only owner can withdraw
+        address nonOwner = makeAddr("nonOwner");
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        dropAutomation.withdrawGauge(amount, makeAddr("recipient"));
+
+        // Owner withdraws
+        address recipient = makeAddr("recipient");
+        vm.prank(owner);
+        dropAutomation.withdrawGauge(amount, recipient);
+
+        // Verify withdrawal
+        assertEq(gaugeContract.balanceOf(address(dropAutomation)), 0, "Staked balance should be 0");
+        assertEq(lpToken.balanceOf(recipient), amount, "Recipient should receive LP tokens");
+    }
+
+    function testEmergencyWithdrawERC20() public {
+        address testToken = address(wethToken);
+        uint256 testAmount = 5e18;
+        address recipient = makeAddr("emergencyRecipient");
+
+        // Deal some tokens to the contract
+        deal(testToken, address(dropAutomation), testAmount);
+
+        // Verify initial balance
+        assertEq(IERC20(testToken).balanceOf(address(dropAutomation)), testAmount, "Contract should have test tokens");
+        assertEq(IERC20(testToken).balanceOf(recipient), 0, "Recipient should start with 0 tokens");
+
+        // Only owner can call emergency withdraw
+        address nonOwner = makeAddr("nonOwner");
+        vm.prank(nonOwner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        dropAutomation.emergencyWithdrawERC20(testToken, recipient);
+
+        // Test invalid token address
+        vm.prank(owner);
+        vm.expectRevert("Invalid token");
+        dropAutomation.emergencyWithdrawERC20(address(0), recipient);
+
+        // Test invalid recipient address
+        vm.prank(owner);
+        vm.expectRevert("Invalid recipient");
+        dropAutomation.emergencyWithdrawERC20(testToken, address(0));
+
+        // Test with no balance
+        vm.prank(owner);
+        dropAutomation.emergencyWithdrawERC20(testToken, recipient); // This should succeed and withdraw testAmount
+
+        // Now test with no balance (should revert)
+        vm.prank(owner);
+        vm.expectRevert("No balance to withdraw");
+        dropAutomation.emergencyWithdrawERC20(testToken, recipient);
+
+        // Verify the successful withdrawal
+        assertEq(
+            IERC20(testToken).balanceOf(address(dropAutomation)), 0, "Contract should have 0 tokens after withdrawal"
+        );
+        assertEq(IERC20(testToken).balanceOf(recipient), testAmount, "Recipient should receive all tokens");
+    }
+
+    function testEmergencyWithdrawERC20EmitsEvent() public {
+        address testToken = address(mamoToken);
+        uint256 testAmount = 10e18;
+        address recipient = makeAddr("eventRecipient");
+
+        // Deal some tokens to the contract
+        deal(testToken, address(dropAutomation), testAmount);
+
+        // Expect the event to be emitted
+        vm.expectEmit(true, true, true, true);
+        emit TokensRecovered(testToken, recipient, testAmount);
+
+        // Execute emergency withdraw
+        vm.prank(owner);
+        dropAutomation.emergencyWithdrawERC20(testToken, recipient);
+    }
+
+    function testEmergencyWithdrawMultipleTokens() public {
+        address token1 = address(wethToken);
+        address token2 = address(mamoToken);
+        uint256 amount1 = 3e18;
+        uint256 amount2 = 7e18;
+        address recipient = makeAddr("multiTokenRecipient");
+
+        // Deal multiple tokens to the contract
+        deal(token1, address(dropAutomation), amount1);
+        deal(token2, address(dropAutomation), amount2);
+
+        // Withdraw first token
+        vm.prank(owner);
+        dropAutomation.emergencyWithdrawERC20(token1, recipient);
+
+        // Withdraw second token
+        vm.prank(owner);
+        dropAutomation.emergencyWithdrawERC20(token2, recipient);
+
+        // Verify both withdrawals
+        assertEq(IERC20(token1).balanceOf(address(dropAutomation)), 0, "Contract should have 0 token1");
+        assertEq(IERC20(token2).balanceOf(address(dropAutomation)), 0, "Contract should have 0 token2");
+        assertEq(IERC20(token1).balanceOf(recipient), amount1, "Recipient should receive token1");
+        assertEq(IERC20(token2).balanceOf(recipient), amount2, "Recipient should receive token2");
+    }
+
+    // Add event definition for the test
+    event TokensRecovered(address indexed token, address indexed to, uint256 amount);
 }

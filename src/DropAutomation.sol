@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.28;
 
+import {IAerodromeGauge} from "./interfaces/IAerodromeGauge.sol";
+
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -46,6 +48,15 @@ contract DropAutomation is Ownable {
     /// @dev Aerodrome quoter used to fetch swap estimates for slippage protection
     IQuoter public immutable AERODROME_QUOTER;
 
+    /// @notice Aerodrome gauge used to earn AERO for the staked LP position
+    IAerodromeGauge public aerodromeGauge;
+
+    /// @notice Reward token emitted by the configured Aerodrome gauge (expected to be AERO)
+    IERC20 public gaugeRewardToken;
+
+    /// @notice LP token staked inside the configured Aerodrome gauge
+    IERC20 public gaugeStakingToken;
+
     /// @notice Address authorized to trigger reward drops
     address public dedicatedMsgSender;
 
@@ -66,6 +77,7 @@ contract DropAutomation is Ownable {
     uint256 private constant DEFAULT_SLIPPAGE_BPS = 100; // 1% default slippage
     uint256 private constant SWAP_DEADLINE_BUFFER = 300; // 5 minutes deadline buffer for MEV protection
     int24 private constant MAMO_CBBTC_TICK_SPACING = 200; // Tick spacing for MAMO/cbBTC CL pool
+    int24 private constant AERO_CBBTC_TICK_SPACING = 200; // Tick spacing for AERO/cbBTC CL pool
 
     event DropCreated(uint256 mamoAmount, uint256 cbBtcAmount);
     event DedicatedMsgSenderUpdated(address indexed oldSender, address indexed newSender);
@@ -74,9 +86,14 @@ contract DropAutomation is Ownable {
     event SwapRouteUpdated(address indexed token, int24 tickSpacing);
     event TokensSwapped(address indexed token, uint256 amountIn, uint256 amountOut);
     event MaxSlippageUpdated(uint256 oldValueBps, uint256 newValueBps);
+    event GaugeConfigured(address indexed gauge, address indexed rewardToken, address indexed stakingToken);
+    event GaugeRewardsHarvested(uint256 rewardAmount, uint256 cbBtcAmount);
+    event GaugeWithdrawn(address indexed recipient, uint256 amount);
+    event TokensRecovered(address indexed token, address indexed to, uint256 amount);
 
     error NotDedicatedSender();
     error InvalidSlippage();
+    error GaugeNotConfigured();
 
     /**
      * @notice Restricts function access to the dedicated message sender
@@ -138,10 +155,19 @@ contract DropAutomation is Ownable {
     }
 
     /**
+     * @notice Harvests gauge rewards and converts to cbBTC (public for testing)
+     * @dev Anyone can call this to test gauge reward harvesting without executing full drop
+     */
+    function harvestGaugeRewards() external {
+        _harvestGaugeRewardsToCbBtc();
+    }
+
+    /**
      * @notice Main automation entry point
      * @dev Executes earn cycle, swaps configured tokens to MAMO, and forwards rewards to the Safe
      */
     function createDrop() external onlyDedicatedMsgSender {
+        _harvestGaugeRewardsToCbBtc();
         _swapTokensToMamoAndCbBtc();
 
         uint256 mamoBalance = MAMO_TOKEN.balanceOf(address(this));
@@ -243,6 +269,52 @@ contract DropAutomation is Ownable {
     }
 
     /**
+     * @notice Configures the Aerodrome gauge used for AERO reward harvesting
+     * @param gauge_ Address of the Aerodrome gauge contract
+     * @param rewardToken_ Address of the gauge reward token (AERO)
+     * @param stakingToken_ Address of the LP token staked in the gauge
+     */
+    function configureGauge(address gauge_, address rewardToken_, address stakingToken_) external onlyOwner {
+        require(gauge_ != address(0), "Invalid gauge");
+        require(rewardToken_ != address(0), "Invalid reward token");
+        require(stakingToken_ != address(0), "Invalid staking token");
+
+        if (gauge_.code.length > 0) {
+            address onChainRewardToken = IAerodromeGauge(gauge_).rewardToken();
+            address onChainStakingToken = IAerodromeGauge(gauge_).stakingToken();
+            require(onChainRewardToken == rewardToken_, "Gauge reward mismatch");
+            require(onChainStakingToken == stakingToken_, "Gauge staking mismatch");
+        }
+
+        aerodromeGauge = IAerodromeGauge(gauge_);
+        gaugeRewardToken = IERC20(rewardToken_);
+        gaugeStakingToken = IERC20(stakingToken_);
+
+        emit GaugeConfigured(gauge_, rewardToken_, stakingToken_);
+    }
+
+    /**
+     * @notice Withdraws staked LP tokens from the configured Aerodrome gauge
+     * @param amount Amount of LP tokens to withdraw
+     * @param recipient Address receiving the withdrawn LP tokens
+     */
+    function withdrawGauge(uint256 amount, address recipient) external onlyOwner {
+        if (address(aerodromeGauge) == address(0) || address(gaugeStakingToken) == address(0)) {
+            revert GaugeNotConfigured();
+        }
+        require(amount > 0, "Amount must be greater than 0");
+        require(recipient != address(0), "Invalid recipient");
+
+        uint256 stakedBalance = aerodromeGauge.balanceOf(address(this));
+        require(amount <= stakedBalance, "Insufficient gauge balance");
+
+        aerodromeGauge.withdraw(amount);
+        gaugeStakingToken.safeTransfer(recipient, amount);
+
+        emit GaugeWithdrawn(recipient, amount);
+    }
+
+    /**
      * @notice Recovers arbitrary ERC20 tokens held by the contract
      * @param token Address of the token to recover
      * @param to Recipient of the recovered tokens
@@ -255,8 +327,90 @@ contract DropAutomation is Ownable {
     }
 
     /**
+     * @notice Emergency function to withdraw all balance of a specific ERC20 token
+     * @param token Address of the token to withdraw
+     * @param to Recipient of the withdrawn tokens
+     * @dev Only callable by owner. Withdraws the entire balance of the specified token
+     */
+    function emergencyWithdrawERC20(address token, address to) external onlyOwner {
+        require(token != address(0), "Invalid token");
+        require(to != address(0), "Invalid recipient");
+
+        IERC20 tokenContract = IERC20(token);
+        uint256 balance = tokenContract.balanceOf(address(this));
+        require(balance > 0, "No balance to withdraw");
+
+        tokenContract.safeTransfer(to, balance);
+
+        emit TokensRecovered(token, to, balance);
+    }
+
+    function _harvestGaugeRewardsToCbBtc() internal {
+        IAerodromeGauge gauge = aerodromeGauge;
+        IERC20 rewardToken = gaugeRewardToken;
+
+        if (address(gauge) == address(0) || address(rewardToken) == address(0)) {
+            return;
+        }
+
+        uint256 rewardBalanceBefore = rewardToken.balanceOf(address(this));
+        uint256 cbBtcBalanceBefore = CBBTC_TOKEN.balanceOf(address(this));
+
+        gauge.getReward(address(this));
+
+        uint256 rewardBalanceAfter = rewardToken.balanceOf(address(this));
+        if (rewardBalanceAfter == 0) {
+            return;
+        }
+
+        _swapRewardTokenToCbBtc(rewardBalanceAfter);
+
+        uint256 cbBtcBalanceAfter = CBBTC_TOKEN.balanceOf(address(this));
+        uint256 harvested = rewardBalanceAfter > rewardBalanceBefore ? rewardBalanceAfter - rewardBalanceBefore : 0;
+        emit GaugeRewardsHarvested(harvested, cbBtcBalanceAfter - cbBtcBalanceBefore);
+    }
+
+    function _swapRewardTokenToCbBtc(uint256 amountIn) internal {
+        if (amountIn == 0) {
+            return;
+        }
+
+        IERC20 rewardToken = gaugeRewardToken;
+        rewardToken.forceApprove(address(AERODROME_CL_ROUTER), amountIn);
+
+        IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
+            tokenIn: address(rewardToken),
+            tokenOut: address(CBBTC_TOKEN),
+            amountIn: amountIn,
+            tickSpacing: AERO_CBBTC_TICK_SPACING,
+            sqrtPriceLimitX96: 0
+        });
+
+        (uint256 quotedAmountOut,,,) = AERODROME_QUOTER.quoteExactInputSingle(params);
+        require(quotedAmountOut > 0, "Invalid quote");
+
+        uint256 minAmountOut = (quotedAmountOut * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
+        require(minAmountOut > 0, "Slippage too high");
+
+        ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
+            tokenIn: address(rewardToken),
+            tokenOut: address(CBBTC_TOKEN),
+            tickSpacing: AERO_CBBTC_TICK_SPACING,
+            recipient: address(this),
+            deadline: block.timestamp + SWAP_DEADLINE_BUFFER,
+            amountIn: amountIn,
+            amountOutMinimum: minAmountOut,
+            sqrtPriceLimitX96: 0
+        });
+
+        uint256 amountOut = AERODROME_CL_ROUTER.exactInputSingle(swapParams);
+
+        require(amountOut >= minAmountOut, "Received less than min amount");
+    }
+
+    /**
      * @notice Swaps all configured tokens to MAMO and then to cbBTC
-     * @dev Iterates through swap tokens, swaps each to MAMO, then swaps half to cbBTC
+     * @dev Iterates through swap tokens, converts each to MAMO, then swaps the received MAMO to cbBTC
      */
     function _swapTokensToMamoAndCbBtc() internal {
         uint256 length = swapTokens.length;

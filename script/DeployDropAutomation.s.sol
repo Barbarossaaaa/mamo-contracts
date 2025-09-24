@@ -46,6 +46,9 @@ contract DeployDropAutomation is Script {
         address safeRewardsDistributorModule = addresses.getAddress("REWARDS_DISTRIBUTOR_MAMO_CBBTC");
         address aerodromeRouter = addresses.getAddress("AERODROME_ROUTER");
         address aerodromeQuoter = addresses.getAddress("AERODROME_QUOTER");
+        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address aeroToken = addresses.getAddress("AERO");
+        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
         // Deploy the DropAutomation
         DropAutomation dropAutomation = new DropAutomation(
@@ -68,6 +71,11 @@ contract DeployDropAutomation is Script {
         console.log("  Safe Rewards Module:", safeRewardsDistributorModule);
         console.log("  Aerodrome Router:", aerodromeRouter);
         console.log("  Aerodrome Quoter:", aerodromeQuoter);
+        console.log("");
+        console.log("  Gauge Configuration (to be set by owner post-deployment):");
+        console.log("    Gauge:", gauge);
+        console.log("    AERO Token:", aeroToken);
+        console.log("    Staking Token:", stakingToken);
 
         return address(dropAutomation);
     }
