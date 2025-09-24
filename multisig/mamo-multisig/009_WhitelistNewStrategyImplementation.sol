@@ -10,7 +10,8 @@ import {StrategyFactoryDeployer} from "@script/StrategyFactoryDeployer.s.sol";
 
 /**
  * @title WhitelistNewStrategyImplementation
- * @notice Multisig proposal to whitelist a new strategy implementation for token type 1
+ * @notice Multisig proposal to whitelist a new strategy implementation for USDC and cbBTC accounts.
+ *         The new implementation includes a claimRewards function compatible with the Merkle protocol.
  * @dev This script will deploy a new ERC20MoonwellMorphoStrategy implementation and whitelist it
  *      for strategy type ID 1, which is used for both USDC and cbBTC strategies.
  */
@@ -21,12 +22,6 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
     StrategyFactoryDeployer public immutable strategyFactoryDeployer;
 
     constructor() {
-        // Initialize addresses
-        string memory addressesFolderPath = "./addresses";
-        uint256[] memory chainIds = new uint256[](1);
-        chainIds[0] = block.chainid;
-        addresses = new Addresses(addressesFolderPath, chainIds);
-
         // Load asset configurations
         deployAssetConfigBtc = new DeployAssetConfig("./config/strategies/cbBTCStrategyConfig.json");
         vm.makePersistent(address(deployAssetConfigBtc));
@@ -37,6 +32,23 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
         // Initialize deployer contracts
         strategyFactoryDeployer = new StrategyFactoryDeployer();
         vm.makePersistent(address(strategyFactoryDeployer));
+    }
+
+    function run() public override {
+        _initalizeAddresses();
+
+        if (DO_DEPLOY) {
+            deploy();
+            //addresses.updateJson();
+            addresses.printJSONChanges();
+        }
+
+        if (DO_PRE_BUILD_MOCK) preBuildMock();
+        if (DO_BUILD) build();
+        if (DO_SIMULATE) simulate();
+        if (DO_VALIDATE) validate();
+        if (DO_PRINT) print();
+        if (DO_UPDATE_ADDRESS_JSON) addresses.updateJson();
     }
 
     function name() public pure override returns (string memory) {
@@ -85,10 +97,10 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
         _simulateActions(multisig);
     }
 
-    function validate() public override {
+    function validate() public view override {
         // Get addresses
         MamoStrategyRegistry registry = MamoStrategyRegistry(addresses.getAddress("MAMO_STRATEGY_REGISTRY"));
-        address newImplementation = addresses.getAddress("NEW_STRATEGY_IMPLEMENTATION");
+        address newImplementation = addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL");
 
         // Validate that the new implementation is whitelisted
         assertTrue(registry.whitelistedImplementations(newImplementation), "New implementation should be whitelisted");
@@ -106,5 +118,15 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
             newImplementation,
             "Latest implementation for type 1 should be updated"
         );
+    }
+
+    function _initalizeAddresses() internal {
+        // Load the addresses from the JSON file
+        string memory addressesFolderPath = "./addresses";
+        uint256[] memory chainIds = new uint256[](1);
+        chainIds[0] = block.chainid; // Use the current chain ID
+
+        addresses = new Addresses(addressesFolderPath, chainIds);
+        vm.makePersistent(address(addresses));
     }
 }
