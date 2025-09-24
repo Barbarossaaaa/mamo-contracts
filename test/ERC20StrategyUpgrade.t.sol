@@ -11,15 +11,15 @@ import {StrategyFactory} from "@contracts/StrategyFactory.sol";
 import {Addresses} from "@fps/addresses/Addresses.sol";
 
 import {ERC1967Proxy} from "@contracts/ERC1967Proxy.sol";
+
+import {MamoStrategyRegistry} from "@contracts/MamoStrategyRegistry.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract ERC20StrategyUpgradeTest is BaseTest {
-    ERC20MoonwellMorphoStrategy public newImplementation;
-    WhitelistNewStrategyImplementation public whitelistNewStrategyImplementation;
-    
-
     address public owner;
     ERC1967Proxy public strategyProxy;
+    ERC20MoonwellMorphoStrategy public newImplementation;
+    MamoStrategyRegistry public registry;
 
     function setUp() public override {
         super.setUp();
@@ -38,20 +38,23 @@ contract ERC20StrategyUpgradeTest is BaseTest {
 
         assertEq(strategyProxy.getImplementation(), addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL_DEPRECATED"));
 
-        newImplementation = ERC20MoonwellMorphoStrategy(addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL"));
-
-        whitelistNewStrategyImplementation = new WhitelistNewStrategyImplementation();
+        WhitelistNewStrategyImplementation whitelistNewStrategyImplementation = new WhitelistNewStrategyImplementation();
+        whitelistNewStrategyImplementation.setAddresses(addresses);
         whitelistNewStrategyImplementation.deploy();
         whitelistNewStrategyImplementation.build();
         whitelistNewStrategyImplementation.simulate();
         whitelistNewStrategyImplementation.validate();
+
+        newImplementation = ERC20MoonwellMorphoStrategy(payable(addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL")));
+
+        registry = MamoStrategyRegistry(addresses.getAddress("MAMO_STRATEGY_REGISTRY"));
     }
 
     function testUpgrade() public {
         vm.startPrank(owner);
-        newImplementation.upgradeToAndCall(address(newImplementation), "");
+        registry.upgradeStrategy(address(strategyProxy), address(newImplementation));
         vm.stopPrank();
 
-        assertEq(newImplementation.getImplementation(), address(newImplementation), "Implementation should be upgraded");
+        assertEq(strategyProxy.getImplementation(), address(newImplementation), "Implementation should be upgraded");
     }
 }
