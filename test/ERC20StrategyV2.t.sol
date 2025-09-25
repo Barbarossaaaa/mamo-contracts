@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BUSL-1.1
+    // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.28;
 
 import {BaseTest} from "./BaseTest.t.sol";
@@ -18,8 +18,10 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract ERC20StrategyV2Test is BaseTest {
     address public owner;
     address public backend;
-    ERC1967Proxy public strategyProxy;
-    ERC20MoonwellMorphoStrategy public strategy;
+    ERC1967Proxy public usdcStrategyProxy;
+    ERC1967Proxy public cbbtcStrategyProxy;
+    ERC20MoonwellMorphoStrategy public usdcStrategy;
+    ERC20MoonwellMorphoStrategy public cbbtcStrategy;
     ERC20MoonwellMorphoStrategy public newImplementation;
     MamoStrategyRegistry public registry;
 
@@ -28,20 +30,29 @@ contract ERC20StrategyV2Test is BaseTest {
         super.setUp();
 
         // create account with old implementation
-        string memory factoryName = "USDC_STRATEGY_FACTORY";
-        StrategyFactory factory = StrategyFactory(payable(addresses.getAddress(factoryName)));
+        string memory usdcFactoryName = "USDC_STRATEGY_FACTORY";
+        string memory cbbtcFactoryName = "cbBTC_STRATEGY_FACTORY";
+        StrategyFactory usdcFactory = StrategyFactory(payable(addresses.getAddress(usdcFactoryName)));
+        StrategyFactory cbbtcFactory = StrategyFactory(payable(addresses.getAddress(cbbtcFactoryName)));
 
         owner = makeAddr("owner");
         backend = addresses.getAddress("STRATEGY_MULTICALL");
 
         vm.startPrank(owner);
-        strategyProxy = ERC1967Proxy(payable(factory.createStrategyForUser(owner)));
-        strategy = ERC20MoonwellMorphoStrategy(payable(address(strategyProxy)));
+        usdcStrategyProxy = ERC1967Proxy(payable(usdcFactory.createStrategyForUser(owner)));
+        cbbtcStrategyProxy = ERC1967Proxy(payable(cbbtcFactory.createStrategyForUser(owner)));
+        usdcStrategy = ERC20MoonwellMorphoStrategy(payable(address(usdcStrategyProxy)));
+        cbbtcStrategy = ERC20MoonwellMorphoStrategy(payable(address(cbbtcStrategyProxy)));
         vm.stopPrank();
 
         vm.warp(block.timestamp + 1 minutes);
 
-        assertEq(strategyProxy.getImplementation(), addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL_DEPRECATED"));
+        assertEq(
+            usdcStrategyProxy.getImplementation(), addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL_DEPRECATED")
+        );
+        assertEq(
+            cbbtcStrategyProxy.getImplementation(), addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL_DEPRECATED")
+        );
 
         WhitelistNewStrategyImplementation whitelistNewStrategyImplementation = new WhitelistNewStrategyImplementation();
         whitelistNewStrategyImplementation.setAddresses(addresses);
@@ -57,10 +68,14 @@ contract ERC20StrategyV2Test is BaseTest {
 
     function testUpgrade() public {
         vm.startPrank(owner);
-        registry.upgradeStrategy(address(strategyProxy), address(newImplementation));
+        registry.upgradeStrategy(address(usdcStrategyProxy), address(newImplementation));
+        registry.upgradeStrategy(address(cbbtcStrategyProxy), address(newImplementation));
         vm.stopPrank();
 
-        assertEq(strategyProxy.getImplementation(), address(newImplementation), "Implementation should be upgraded");
+        assertEq(usdcStrategyProxy.getImplementation(), address(newImplementation), "Implementation should be upgraded");
+        assertEq(
+            cbbtcStrategyProxy.getImplementation(), address(newImplementation), "Implementation should be upgraded"
+        );
     }
 
     function testBackendCanClaimRewards() public {
@@ -87,7 +102,8 @@ contract ERC20StrategyV2Test is BaseTest {
         emit ERC20MoonwellMorphoStrategy.RewardsClaimed(rewardTokens, rewardAmounts);
 
         vm.startPrank(backend);
-        strategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+        usdcStrategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+        cbbtcStrategy.claimRewards(rewardTokens, rewardAmounts, proofs);
         vm.stopPrank();
     }
 
@@ -102,10 +118,13 @@ contract ERC20StrategyV2Test is BaseTest {
         proofs[0] = new bytes32[](1);
         proofs[0][0] = bytes32(0);
 
-        vm.expectRevert("Not backend");
-
         vm.startPrank(makeAddr("not_backend"));
-        strategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+
+        vm.expectRevert("Not backend");
+        usdcStrategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+
+        vm.expectRevert("Not backend");
+        cbbtcStrategy.claimRewards(rewardTokens, rewardAmounts, proofs);
         vm.stopPrank();
     }
 
@@ -123,10 +142,13 @@ contract ERC20StrategyV2Test is BaseTest {
         proofs[1] = new bytes32[](1);
         proofs[1][0] = bytes32(0);
 
-        vm.expectRevert("Reward tokens and amounts length mismatch");
-
         vm.startPrank(backend);
-        strategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+
+        vm.expectRevert("Reward tokens and amounts length mismatch");
+        usdcStrategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+
+        vm.expectRevert("Reward tokens and amounts length mismatch");
+        cbbtcStrategy.claimRewards(rewardTokens, rewardAmounts, proofs);
         vm.stopPrank();
     }
 
@@ -143,10 +165,25 @@ contract ERC20StrategyV2Test is BaseTest {
         proofs[0] = new bytes32[](1);
         proofs[0][0] = bytes32(0);
 
-        vm.expectRevert("Reward tokens and proofs length mismatch");
-
         vm.startPrank(backend);
-        strategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+
+        vm.expectRevert("Reward tokens and proofs length mismatch");
+        usdcStrategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+        vm.expectRevert("Reward tokens and proofs length mismatch");
+        cbbtcStrategy.claimRewards(rewardTokens, rewardAmounts, proofs);
+
+        vm.stopPrank();
+    }
+
+    function test_FactoryCanCreateStrategy() public {
+        string memory usdcFactoryName = "USDC_STRATEGY_FACTORY";
+        string memory cbbtcFactoryName = "cbBTC_STRATEGY_FACTORY";
+        StrategyFactory usdcFactory = StrategyFactory(payable(addresses.getAddress(usdcFactoryName)));
+        StrategyFactory cbbtcFactory = StrategyFactory(payable(addresses.getAddress(cbbtcFactoryName)));
+
+        vm.startPrank(owner);
+        usdcFactory.createStrategyForUser(owner);
+        cbbtcFactory.createStrategyForUser(owner);
         vm.stopPrank();
     }
 }

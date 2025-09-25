@@ -89,6 +89,14 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
         // Whitelist the new implementation for strategy type ID 1
         // This will update latestImplementationById[1] to point to the new implementation
         registry.whitelistImplementation(newImplementation, STRATEGY_TYPE_ID);
+
+        // give the backend role to the new factories
+        registry.grantRole(registry.BACKEND_ROLE(), addresses.getAddress("cbBTC_STRATEGY_FACTORY"));
+        registry.grantRole(registry.BACKEND_ROLE(), addresses.getAddress("USDC_STRATEGY_FACTORY"));
+
+        // remove the backend role from the old factories
+        registry.revokeRole(registry.BACKEND_ROLE(), addresses.getAddress("cbBTC_STRATEGY_FACTORY_DEPRECATED"));
+        registry.revokeRole(registry.BACKEND_ROLE(), addresses.getAddress("USDC_STRATEGY_FACTORY_DEPRECATED"));
     }
 
     function simulate() public override {
@@ -118,6 +126,16 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
             newImplementation,
             "Latest implementation for type 1 should be updated"
         );
+
+        // Validate that the new factories have the backend role
+        assertTrue(registry.hasRole(registry.BACKEND_ROLE(), addresses.getAddress("cbBTC_STRATEGY_FACTORY")));
+        assertTrue(registry.hasRole(registry.BACKEND_ROLE(), addresses.getAddress("USDC_STRATEGY_FACTORY")));
+
+        // Validate that the old factories no longer have the backend role
+        assertFalse(
+            registry.hasRole(registry.BACKEND_ROLE(), addresses.getAddress("cbBTC_STRATEGY_FACTORY_DEPRECATED"))
+        );
+        assertFalse(registry.hasRole(registry.BACKEND_ROLE(), addresses.getAddress("USDC_STRATEGY_FACTORY_DEPRECATED")));
     }
 
     function _initalizeAddresses() internal {
