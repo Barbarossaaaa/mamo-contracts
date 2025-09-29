@@ -46,7 +46,7 @@ contract DeployDropAutomation is Script {
         address safeRewardsDistributorModule = addresses.getAddress("REWARDS_DISTRIBUTOR_MAMO_CBBTC");
         address aerodromeRouter = addresses.getAddress("AERODROME_ROUTER");
         address aerodromeQuoter = addresses.getAddress("AERODROME_QUOTER");
-        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
         address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 

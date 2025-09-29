@@ -321,7 +321,7 @@
   },
   {
     "addr": "0x4F09bAb2f0E15e2A078A227FE1537665F55b8360",
-    "name": "AERODROME_GAUGE",
+    "name": "AERODROME_USDC_AERO_GAUGE",
     "isContract": true
   },
   {

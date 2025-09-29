@@ -277,12 +277,12 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         deal(VIRTUALS_TOKEN, address(dropAutomation), EXTRA_TOKEN_TOP_UP);
 
         // Configure gauge so AERO rewards can be processed
-        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
         address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
         vm.prank(owner);
-        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+        dropAutomation.addGauge(gauge);
 
         // Add AERO tokens to simulate gauge rewards
         deal(aeroToken, address(dropAutomation), EXTRA_TOKEN_TOP_UP);
@@ -365,39 +365,38 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
     }
 
     function testGaugeConfiguration() public {
-        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
         address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
-        // Initially gauge should not be configured
-        assertEq(address(dropAutomation.aerodromeGauge()), address(0), "gauge should not be set initially");
-        assertEq(address(dropAutomation.gaugeRewardToken()), address(0), "reward token should not be set initially");
-        assertEq(address(dropAutomation.gaugeStakingToken()), address(0), "staking token should not be set initially");
+        // Initially no gauges should be configured
+        assertEq(dropAutomation.getGaugeCount(), 0, "should have no gauges initially");
+        assertFalse(dropAutomation.isConfiguredGauge(gauge), "gauge should not be configured initially");
 
-        // Only owner can configure gauge
+        // Only owner can add gauge
         address attacker = makeAddr("attacker");
         vm.prank(attacker);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+        dropAutomation.addGauge(gauge);
 
-        // Owner configures gauge
+        // Owner adds gauge
         vm.prank(owner);
-        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+        dropAutomation.addGauge(gauge);
 
         // Verify configuration
-        assertEq(address(dropAutomation.aerodromeGauge()), gauge, "gauge should be configured");
-        assertEq(address(dropAutomation.gaugeRewardToken()), aeroToken, "reward token should be configured");
-        assertEq(address(dropAutomation.gaugeStakingToken()), stakingToken, "staking token should be configured");
+        assertEq(dropAutomation.getGaugeCount(), 1, "should have 1 gauge configured");
+        assertTrue(dropAutomation.isConfiguredGauge(gauge), "gauge should be configured");
+        assertEq(address(dropAutomation.aerodromeGauges(0)), gauge, "first gauge should be the configured gauge");
     }
 
     function testTransferGaugePositionFromFMamo() public {
         // Configure gauge first
-        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
         address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
         vm.prank(owner);
-        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+        dropAutomation.addGauge(gauge);
 
         // Check F-MAMO's current gauge balance
         IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
@@ -429,12 +428,12 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
 
     function testHarvestGaugeRewards() public {
         // Setup gauge configuration
-        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
         address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
         vm.prank(owner);
-        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+        dropAutomation.addGauge(gauge);
 
         // Transfer gauge position from F-MAMO to DropAutomation
         IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
@@ -482,12 +481,12 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
 
     function testWithdrawGauge() public {
         // Setup gauge with staked position
-        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
         address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
         vm.prank(owner);
-        dropAutomation.configureGauge(gauge, aeroToken, stakingToken);
+        dropAutomation.addGauge(gauge);
 
         IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
         IERC20 lpToken = IERC20(stakingToken);
@@ -506,19 +505,19 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         address nonOwner = makeAddr("nonOwner");
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
-        dropAutomation.withdrawGauge(amount, makeAddr("recipient"));
+        dropAutomation.withdrawGauge(gauge, amount, makeAddr("recipient"));
 
         // Owner withdraws
         address recipient = makeAddr("recipient");
         vm.prank(owner);
-        dropAutomation.withdrawGauge(amount, recipient);
+        dropAutomation.withdrawGauge(gauge, amount, recipient);
 
         // Verify withdrawal
         assertEq(gaugeContract.balanceOf(address(dropAutomation)), 0, "Staked balance should be 0");
         assertEq(lpToken.balanceOf(recipient), amount, "Recipient should receive LP tokens");
     }
 
-    function testEmergencyWithdrawERC20() public {
+    function testRecoverERC20WithZeroAmount() public {
         address testToken = address(wethToken);
         uint256 testAmount = 5e18;
         address recipient = makeAddr("emergencyRecipient");
@@ -530,30 +529,30 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         assertEq(IERC20(testToken).balanceOf(address(dropAutomation)), testAmount, "Contract should have test tokens");
         assertEq(IERC20(testToken).balanceOf(recipient), 0, "Recipient should start with 0 tokens");
 
-        // Only owner can call emergency withdraw
+        // Only owner can call recover
         address nonOwner = makeAddr("nonOwner");
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
-        dropAutomation.emergencyWithdrawERC20(testToken, recipient);
+        dropAutomation.recoverERC20(testToken, recipient, 0);
 
         // Test invalid token address
         vm.prank(owner);
         vm.expectRevert("Invalid token");
-        dropAutomation.emergencyWithdrawERC20(address(0), recipient);
+        dropAutomation.recoverERC20(address(0), recipient, 0);
 
         // Test invalid recipient address
         vm.prank(owner);
         vm.expectRevert("Invalid recipient");
-        dropAutomation.emergencyWithdrawERC20(testToken, address(0));
+        dropAutomation.recoverERC20(testToken, address(0), 0);
 
-        // Test with no balance
+        // Test withdraw all (amount = 0)
         vm.prank(owner);
-        dropAutomation.emergencyWithdrawERC20(testToken, recipient); // This should succeed and withdraw testAmount
+        dropAutomation.recoverERC20(testToken, recipient, 0); // This should withdraw all
 
         // Now test with no balance (should revert)
         vm.prank(owner);
         vm.expectRevert("No balance to withdraw");
-        dropAutomation.emergencyWithdrawERC20(testToken, recipient);
+        dropAutomation.recoverERC20(testToken, recipient, 0);
 
         // Verify the successful withdrawal
         assertEq(
@@ -562,7 +561,7 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         assertEq(IERC20(testToken).balanceOf(recipient), testAmount, "Recipient should receive all tokens");
     }
 
-    function testEmergencyWithdrawERC20EmitsEvent() public {
+    function testRecoverERC20EmitsEvent() public {
         address testToken = address(mamoToken);
         uint256 testAmount = 10e18;
         address recipient = makeAddr("eventRecipient");
@@ -574,37 +573,82 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         vm.expectEmit(true, true, true, true);
         emit TokensRecovered(testToken, recipient, testAmount);
 
-        // Execute emergency withdraw
+        // Execute recovery with specific amount
         vm.prank(owner);
-        dropAutomation.emergencyWithdrawERC20(testToken, recipient);
+        dropAutomation.recoverERC20(testToken, recipient, testAmount);
     }
 
-    function testEmergencyWithdrawMultipleTokens() public {
+    function testRecoverERC20PartialAmount() public {
         address token1 = address(wethToken);
         address token2 = address(mamoToken);
-        uint256 amount1 = 3e18;
-        uint256 amount2 = 7e18;
+        uint256 amount1 = 10e18;
+        uint256 amount2 = 20e18;
+        uint256 withdrawAmount1 = 3e18;
+        uint256 withdrawAmount2 = 7e18;
         address recipient = makeAddr("multiTokenRecipient");
 
         // Deal multiple tokens to the contract
         deal(token1, address(dropAutomation), amount1);
         deal(token2, address(dropAutomation), amount2);
 
-        // Withdraw first token
+        // Withdraw partial amount from first token
         vm.prank(owner);
-        dropAutomation.emergencyWithdrawERC20(token1, recipient);
+        dropAutomation.recoverERC20(token1, recipient, withdrawAmount1);
 
-        // Withdraw second token
+        // Withdraw partial amount from second token
         vm.prank(owner);
-        dropAutomation.emergencyWithdrawERC20(token2, recipient);
+        dropAutomation.recoverERC20(token2, recipient, withdrawAmount2);
 
-        // Verify both withdrawals
-        assertEq(IERC20(token1).balanceOf(address(dropAutomation)), 0, "Contract should have 0 token1");
-        assertEq(IERC20(token2).balanceOf(address(dropAutomation)), 0, "Contract should have 0 token2");
-        assertEq(IERC20(token1).balanceOf(recipient), amount1, "Recipient should receive token1");
-        assertEq(IERC20(token2).balanceOf(recipient), amount2, "Recipient should receive token2");
+        // Verify partial withdrawals
+        assertEq(
+            IERC20(token1).balanceOf(address(dropAutomation)),
+            amount1 - withdrawAmount1,
+            "Contract should have remaining token1"
+        );
+        assertEq(
+            IERC20(token2).balanceOf(address(dropAutomation)),
+            amount2 - withdrawAmount2,
+            "Contract should have remaining token2"
+        );
+        assertEq(IERC20(token1).balanceOf(recipient), withdrawAmount1, "Recipient should receive partial token1");
+        assertEq(IERC20(token2).balanceOf(recipient), withdrawAmount2, "Recipient should receive partial token2");
     }
 
-    // Add event definition for the test
+    function testAddAndRemoveGauge() public {
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
+        address aeroToken = addresses.getAddress("AERO");
+        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
+
+        // Initially no gauges
+        assertEq(dropAutomation.getGaugeCount(), 0, "should start with 0 gauges");
+
+        // Add gauge
+        vm.expectEmit(true, true, true, true);
+        emit GaugeAdded(gauge, aeroToken, stakingToken);
+
+        vm.prank(owner);
+        dropAutomation.addGauge(gauge);
+
+        // Verify addition
+        assertEq(dropAutomation.getGaugeCount(), 1, "should have 1 gauge after adding");
+        assertTrue(dropAutomation.isConfiguredGauge(gauge), "gauge should be configured");
+        assertEq(address(dropAutomation.aerodromeGauges(0)), gauge, "gauge should be at index 0");
+
+        // Cannot add same gauge twice
+        vm.prank(owner);
+        vm.expectRevert("Gauge already configured");
+        dropAutomation.addGauge(gauge);
+
+        // Remove gauge
+        vm.prank(owner);
+        dropAutomation.removeGauge(gauge);
+
+        // Verify removal
+        assertEq(dropAutomation.getGaugeCount(), 0, "should have 0 gauges after removal");
+        assertFalse(dropAutomation.isConfiguredGauge(gauge), "gauge should not be configured after removal");
+    }
+
+    // Update event definitions for the test
     event TokensRecovered(address indexed token, address indexed to, uint256 amount);
+    event GaugeAdded(address indexed gauge, address indexed rewardToken, address indexed stakingToken);
 }

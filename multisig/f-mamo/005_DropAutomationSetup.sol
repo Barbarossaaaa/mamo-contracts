@@ -21,7 +21,8 @@ import {console} from "forge-std/console.sol";
  *      2. Transfers RewardsDistributorSafeModule admin from F-MAMO to DropAutomation
  *      3. Sets BurnAndEarn fee collector to DropAutomation
  *      4. Transfers gauge position to DropAutomation
- *      5. Configures swap tokens (WETH, ZORA, EDGE, VIRTUALS)
+ *      5. Adds USDC-AERO gauge for reward harvesting
+ *      6. Configures swap tokens (WETH, ZORA, EDGE, VIRTUALS)
  * Note: BurnAndEarn ownership remains with F-MAMO for governance control
  */
 contract DropAutomationSetup is MultisigProposal {
@@ -79,7 +80,7 @@ contract DropAutomationSetup is MultisigProposal {
         address dropAutomation = addresses.getAddress("DROP_AUTOMATION");
         address rewardsDistributorModule = addresses.getAddress("REWARDS_DISTRIBUTOR_MAMO_CBBTC");
         address burnAndEarnAddress = addresses.getAddress("BURN_AND_EARN");
-        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
         // 1. Transfer RewardsDistributorSafeModule admin to DropAutomation
@@ -115,7 +116,12 @@ contract DropAutomationSetup is MultisigProposal {
 
         DropAutomation dropAutomationContract = DropAutomation(dropAutomation);
 
-        // Add swap tokens if not already configured
+        // 5. Configure gauge for reward harvesting
+        if (!dropAutomationContract.isConfiguredGauge(gauge)) {
+            dropAutomationContract.addGauge(gauge);
+        }
+
+        // 6. Add swap tokens if not already configured
         if (!dropAutomationContract.isSwapToken(wethToken)) {
             dropAutomationContract.addSwapToken(wethToken, volatileTickSpacing);
         }
@@ -147,7 +153,7 @@ contract DropAutomationSetup is MultisigProposal {
         address fMamoSafe = addresses.getAddress("F-MAMO");
 
         // Validate DropAutomation deployment
-        require(dropAutomation.code.length > 0, "DropAutomation not deployed");
+        assertGt(dropAutomation.code.length, 0, "DropAutomation not deployed");
 
         DropAutomation dropAutomationContract = DropAutomation(dropAutomation);
 
@@ -190,14 +196,16 @@ contract DropAutomationSetup is MultisigProposal {
             "RewardsDistributorSafeModule should no longer have F-MAMO as admin"
         );
 
-        // Validate gauge position transfer (if applicable)
-        address gauge = addresses.getAddress("AERODROME_GAUGE");
+        // Validate gauge configuration and position transfer
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
+        assertTrue(dropAutomationContract.isConfiguredGauge(gauge), "Gauge should be configured");
+        assertEq(dropAutomationContract.getGaugeCount(), 1, "Should have 1 configured gauge");
+
         IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
         uint256 dropAutomationStakedBalance = gaugeContract.balanceOf(dropAutomation);
 
         if (dropAutomationStakedBalance > 0) {
             console.log("LP tokens staked in gauge for DropAutomation:", dropAutomationStakedBalance);
-            console.log("Note: F-MAMO (owner) must configure gauge parameters on DropAutomation");
         }
 
         // Validate swap tokens are configured
