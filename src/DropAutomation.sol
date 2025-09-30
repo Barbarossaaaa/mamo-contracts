@@ -374,7 +374,12 @@ contract DropAutomation is Ownable {
 
     /**
      * @notice Harvests rewards from all configured gauges and converts to cbBTC
-     * @dev Iterates through all configured gauges, harvests rewards, and swaps to cbBTC
+     * @dev Iterates through all configured gauges, harvests rewards, and swaps to cbBTC.
+     *      For each gauge:
+     *      1. Claims rewards by calling gauge.getReward()
+     *      2. Swaps the received reward tokens to cbBTC via Aerodrome
+     *      3. Emits GaugeRewardsHarvested event with the amounts
+     *      Reverts if no gauges are configured. Skips gauges with zero rewards.
      */
     function _harvestGaugeRewardsToCbBtc() internal {
         uint256 gaugeCount = aerodromeGauges.length;
@@ -405,6 +410,19 @@ contract DropAutomation is Ownable {
         }
     }
 
+    /**
+     * @notice Swaps reward tokens from gauges to cbBTC
+     * @param amountIn Amount of reward tokens to swap
+     * @param rewardTokenAddress Address of the reward token to swap from
+     * @dev Uses Aerodrome CL router with slippage protection to swap rewards to cbBTC.
+     *      Process:
+     *      1. Approves the Aerodrome router to spend the reward tokens
+     *      2. Gets a price quote from the Aerodrome quoter
+     *      3. Calculates minimum output based on maxSlippageBps
+     *      4. Executes the swap via exactInputSingle
+     *      5. Verifies the received amount meets the minimum
+     *      Returns early if amountIn is 0. Uses AERO_CBBTC_TICK_SPACING (200) for the pool.
+     */
     function _swapRewardTokenToCbBtc(uint256 amountIn, address rewardTokenAddress) internal {
         if (amountIn == 0) {
             return;
@@ -445,7 +463,13 @@ contract DropAutomation is Ownable {
 
     /**
      * @notice Swaps all configured tokens to MAMO and then to cbBTC
-     * @dev Iterates through swap tokens, converts each to MAMO, then swaps the received MAMO to cbBTC
+     * @dev Iterates through swap tokens, converts each to MAMO, then swaps the received MAMO to cbBTC.
+     *      For each configured swap token:
+     *      1. Checks the contract's balance of the token
+     *      2. Skips if balance is zero
+     *      3. Calls _swapToMamo() to convert the token to MAMO
+     *      4. Calls _swapMamoToCbBtc() to convert the received MAMO to cbBTC
+     *      This two-step process allows collecting various tokens from rewards and converting them all to cbBTC.
      */
     function _swapTokensToMamoAndCbBtc() internal {
         uint256 length = swapTokens.length;
@@ -509,7 +533,14 @@ contract DropAutomation is Ownable {
     /**
      * @notice Swaps MAMO tokens to cbBTC
      * @param amountIn Amount of MAMO tokens to swap
-     * @dev Uses Aerodrome CL router with slippage protection
+     * @dev Uses Aerodrome CL router with slippage protection.
+     *      Process:
+     *      1. Approves the Aerodrome router to spend MAMO tokens
+     *      2. Gets a price quote from the Aerodrome quoter for MAMO/cbBTC
+     *      3. Calculates minimum output based on maxSlippageBps tolerance
+     *      4. Executes the swap via exactInputSingle on the MAMO/cbBTC pool
+     *      5. Verifies the received cbBTC amount meets the minimum
+     *      Uses MAMO_CBBTC_TICK_SPACING (200) for the concentrated liquidity pool.
      */
     function _swapMamoToCbBtc(uint256 amountIn) internal {
         MAMO_TOKEN.forceApprove(address(AERODROME_CL_ROUTER), amountIn);
