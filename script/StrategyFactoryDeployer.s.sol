@@ -98,7 +98,7 @@ contract StrategyFactoryDeployer is Script {
             addresses.changeAddress(factoryName, address(factory), true);
 
             // Add old address with _DEPRECATED suffix
-            addresses.addAddress(string(abi.encodePacked(factoryName, "_DEPRECATED")), oldAddress, true);
+            //addresses.addAddress(string(abi.encodePacked(factoryName, "_DEPRECATED")), oldAddress, true);
         } else {
             // Add the factory address to the addresses contract
             addresses.addAddress(factoryName, address(factory), true);
@@ -159,7 +159,7 @@ contract StrategyFactoryDeployer is Script {
             addresses.changeAddress(factoryName, address(factory), true);
 
             // Add old address with _DEPRECATED suffix
-            addresses.addAddress(string(abi.encodePacked(factoryName, "_DEPRECATED")), oldAddress, true);
+            //addresses.addAddress(string(abi.encodePacked(factoryName, "_DEPRECATED")), oldAddress, true);
         } else {
             // Add the factory address to the addresses contract
             addresses.addAddress(factoryName, address(factory), true);

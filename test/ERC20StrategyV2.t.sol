@@ -26,12 +26,12 @@ contract ERC20StrategyV2Test is BaseTest {
     MamoStrategyRegistry public registry;
 
     function setUp() public override {
-        vm.createSelectFork({urlOrAlias: "base", blockNumber: 35963655}); // Forked at 2025-09-24
+        vm.createSelectFork({urlOrAlias: "base", blockNumber: 36224833});
         super.setUp();
 
         // create account with old implementation
-        string memory usdcFactoryName = "USDC_STRATEGY_FACTORY";
-        string memory cbbtcFactoryName = "cbBTC_STRATEGY_FACTORY";
+        string memory usdcFactoryName = "USDC_STRATEGY_FACTORY_DEPRECATED";
+        string memory cbbtcFactoryName = "cbBTC_STRATEGY_FACTORY_DEPRECATED";
         StrategyFactory usdcFactory = StrategyFactory(payable(addresses.getAddress(usdcFactoryName)));
         StrategyFactory cbbtcFactory = StrategyFactory(payable(addresses.getAddress(cbbtcFactoryName)));
 

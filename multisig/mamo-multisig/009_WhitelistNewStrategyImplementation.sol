@@ -67,8 +67,10 @@ contract WhitelistNewStrategyImplementation is MultisigProposal {
         address newImplementation = address(new ERC20MoonwellMorphoStrategy());
         vm.stopBroadcast();
 
-        // Store the new implementation address
-        addresses.addAddress("MOONWELL_MORPHO_STRATEGY_IMPL", newImplementation, true);
+        if (addresses.isAddressSet("MOONWELL_MORPHO_STRATEGY_IMPL")) {
+            address oldAddress = addresses.getAddress("MOONWELL_MORPHO_STRATEGY_IMPL");
+            addresses.changeAddress("MOONWELL_MORPHO_STRATEGY_IMPL", newImplementation, true);
+        }
 
         // Deploy cbBTC strategy factory
         DeployAssetConfig.Config memory configBtc = deployAssetConfigBtc.getConfig();
