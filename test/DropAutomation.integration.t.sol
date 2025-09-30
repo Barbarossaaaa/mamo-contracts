@@ -6,15 +6,15 @@ import {BaseTest} from "./BaseTest.t.sol";
 import {DropAutomation} from "@contracts/DropAutomation.sol";
 import {RewardsDistributorSafeModule} from "@contracts/RewardsDistributorSafeModule.sol";
 
+import {DropAutomationSetup} from "../multisig/f-mamo/005_DropAutomationSetup.sol";
 import {IAerodromeGauge} from "@contracts/interfaces/IAerodromeGauge.sol";
-import {DeployDropAutomation} from "@script/DeployDropAutomation.s.sol";
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {ISafe} from "@contracts/interfaces/ISafe.sol";
 
-contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
+contract DropAutomationIntegrationTest is BaseTest {
     DropAutomation public dropAutomation;
     RewardsDistributorSafeModule public rewardsModule;
 
@@ -47,17 +47,26 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
     function setUp() public override {
         super.setUp();
 
-        // Check if DropAutomation already exists, otherwise deploy it
-        if (addresses.isAddressSet("DROP_AUTOMATION")) {
-            dropAutomation = DropAutomation(addresses.getAddress("DROP_AUTOMATION"));
-        } else {
-            // Deploy DropAutomation via the deploy script
-            dropAutomation = DropAutomation(deploy(addresses));
-        }
-
-        // Get addresses from the deployed contract
+        // Get addresses we need
         owner = addresses.getAddress("F-MAMO");
         dedicatedSender = addresses.getAddress("GELATO_SENDER");
+
+        // Use the 005_DropAutomationSetup script to deploy and configure
+        DropAutomationSetup setupScript = new DropAutomationSetup();
+
+        // Pass our addresses instance to the setup script
+        setupScript.setAddresses(addresses);
+
+        // Make the deployDropAutomation persistent so it can access our addresses
+        vm.makePersistent(address(setupScript.deployDropAutomation()));
+
+        // Deploy DropAutomation using the setup script's deploy function
+        // Note: The deploy function doesn't add the address to the registry, so we need to do it manually
+        address dropAutomationAddr = setupScript.deployDropAutomation().deploy(addresses);
+        addresses.addAddress("DROP_AUTOMATION", dropAutomationAddr, true);
+
+        // Get the deployed contract
+        dropAutomation = DropAutomation(addresses.getAddress("DROP_AUTOMATION"));
 
         mamoToken = IERC20(dropAutomation.MAMO_TOKEN());
         cbBtcToken = IERC20(dropAutomation.CBBTC_TOKEN());
@@ -67,7 +76,12 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         fMamoSafe = ISafe(payable(dropAutomation.F_MAMO_SAFE()));
 
         _ensureModuleReady();
-        _configureSwapTokens();
+
+        // Note: We call the 005_DropAutomationSetup.sol multisig script above for deployment.
+        // The script's build() function would configure swap tokens and gauges in production,
+        // but it uses buildModifier which conflicts with the test environment's vm.prank usage.
+        // For tests, we configure manually below to match what the script does in production.
+        _configureSwapTokensAndGauges();
     }
 
     function testInitialization() public view {
@@ -276,15 +290,8 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         deal(EDGE_TOKEN, address(dropAutomation), EXTRA_TOKEN_TOP_UP);
         deal(VIRTUALS_TOKEN, address(dropAutomation), EXTRA_TOKEN_TOP_UP);
 
-        // Configure gauge so AERO rewards can be processed
-        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
-        address aeroToken = addresses.getAddress("AERO");
-        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
-
-        vm.prank(owner);
-        dropAutomation.addGauge(gauge);
-
         // Add AERO tokens to simulate gauge rewards
+        address aeroToken = addresses.getAddress("AERO");
         deal(aeroToken, address(dropAutomation), EXTRA_TOKEN_TOP_UP);
 
         uint256 safeMamoBefore = mamoToken.balanceOf(address(fMamoSafe));
@@ -315,7 +322,7 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
     }
 
     function _ensureModuleReady() internal {
-        // Make DropAutomation the admin so it can call addRewards
+        // Transfer admin role to DropAutomation (this is done by the multisig script in production)
         vm.startPrank(address(fMamoSafe));
         if (rewardsModule.admin() != address(dropAutomation)) {
             rewardsModule.setAdmin(address(dropAutomation));
@@ -344,11 +351,14 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         }
     }
 
-    function _configureSwapTokens() internal {
+    function _configureSwapTokensAndGauges() internal {
+        // This mirrors what 005_DropAutomationSetup.sol build() does in production
         // CL pools on Aerodrome use 200 tick spacing for volatile assets
         int24 volatileTickSpacing = 200;
 
         vm.startPrank(owner);
+
+        // Add swap tokens if not already configured
         if (!dropAutomation.isSwapToken(address(wethToken))) {
             dropAutomation.addSwapToken(address(wethToken), volatileTickSpacing);
         }
@@ -361,42 +371,41 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         if (!dropAutomation.isSwapToken(VIRTUALS_TOKEN)) {
             dropAutomation.addSwapToken(VIRTUALS_TOKEN, volatileTickSpacing);
         }
+
+        // Add gauge if not already configured
+        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
+        if (!dropAutomation.isConfiguredGauge(gauge)) {
+            dropAutomation.addGauge(gauge);
+        }
+
         vm.stopPrank();
     }
 
     function testGaugeConfiguration() public {
         address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
-        address aeroToken = addresses.getAddress("AERO");
-        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
-        // Initially no gauges should be configured
-        assertEq(dropAutomation.getGaugeCount(), 0, "should have no gauges initially");
-        assertFalse(dropAutomation.isConfiguredGauge(gauge), "gauge should not be configured initially");
-
-        // Only owner can add gauge
-        address attacker = makeAddr("attacker");
-        vm.prank(attacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-        dropAutomation.addGauge(gauge);
-
-        // Owner adds gauge
-        vm.prank(owner);
-        dropAutomation.addGauge(gauge);
-
-        // Verify configuration
+        // Gauge should be configured by setUp
         assertEq(dropAutomation.getGaugeCount(), 1, "should have 1 gauge configured");
         assertTrue(dropAutomation.isConfiguredGauge(gauge), "gauge should be configured");
         assertEq(address(dropAutomation.aerodromeGauges(0)), gauge, "first gauge should be the configured gauge");
+
+        // Cannot add same gauge twice
+        vm.prank(owner);
+        vm.expectRevert("Gauge already configured");
+        dropAutomation.addGauge(gauge);
+
+        // Only owner can add gauge
+        address attacker = makeAddr("attacker");
+        address newGauge = makeAddr("newGauge");
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
+        dropAutomation.addGauge(newGauge);
     }
 
     function testTransferGaugePositionFromFMamo() public {
-        // Configure gauge first
+        // Gauge is already configured by setUp
         address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
-        address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
-
-        vm.prank(owner);
-        dropAutomation.addGauge(gauge);
 
         // Check F-MAMO's current gauge balance
         IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
@@ -427,13 +436,9 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
     }
 
     function testHarvestGaugeRewards() public {
-        // Setup gauge configuration
+        // Gauge is already configured by setUp
         address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
-        address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
-
-        vm.prank(owner);
-        dropAutomation.addGauge(gauge);
 
         // Transfer gauge position from F-MAMO to DropAutomation
         IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
@@ -457,6 +462,7 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
             vm.roll(block.number + 50400); // ~7 days of blocks
 
             // Record balances before harvest
+            address aeroToken = addresses.getAddress("AERO");
             IERC20 aero = IERC20(aeroToken);
             IERC20 cbBtc = IERC20(addresses.getAddress("cbBTC"));
             uint256 aeroBefore = aero.balanceOf(address(dropAutomation));
@@ -480,13 +486,9 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
     }
 
     function testWithdrawGauge() public {
-        // Setup gauge with staked position
+        // Gauge is already configured by setUp
         address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
-        address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
-
-        vm.prank(owner);
-        dropAutomation.addGauge(gauge);
 
         IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
         IERC20 lpToken = IERC20(stakingToken);
@@ -619,20 +621,9 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         address aeroToken = addresses.getAddress("AERO");
         address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
-        // Initially no gauges
-        assertEq(dropAutomation.getGaugeCount(), 0, "should start with 0 gauges");
-
-        // Add gauge
-        vm.expectEmit(true, true, true, true);
-        emit GaugeAdded(gauge, aeroToken, stakingToken);
-
-        vm.prank(owner);
-        dropAutomation.addGauge(gauge);
-
-        // Verify addition
-        assertEq(dropAutomation.getGaugeCount(), 1, "should have 1 gauge after adding");
+        // Gauge already configured by setUp
+        assertEq(dropAutomation.getGaugeCount(), 1, "should have 1 gauge from setUp");
         assertTrue(dropAutomation.isConfiguredGauge(gauge), "gauge should be configured");
-        assertEq(address(dropAutomation.aerodromeGauges(0)), gauge, "gauge should be at index 0");
 
         // Cannot add same gauge twice
         vm.prank(owner);
@@ -646,6 +637,18 @@ contract DropAutomationIntegrationTest is BaseTest, DeployDropAutomation {
         // Verify removal
         assertEq(dropAutomation.getGaugeCount(), 0, "should have 0 gauges after removal");
         assertFalse(dropAutomation.isConfiguredGauge(gauge), "gauge should not be configured after removal");
+
+        // Now can add it again
+        vm.expectEmit(true, true, true, true);
+        emit GaugeAdded(gauge, aeroToken, stakingToken);
+
+        vm.prank(owner);
+        dropAutomation.addGauge(gauge);
+
+        // Verify re-addition
+        assertEq(dropAutomation.getGaugeCount(), 1, "should have 1 gauge after re-adding");
+        assertTrue(dropAutomation.isConfiguredGauge(gauge), "gauge should be configured again");
+        assertEq(address(dropAutomation.aerodromeGauges(0)), gauge, "gauge should be at index 0");
     }
 
     // Update event definitions for the test

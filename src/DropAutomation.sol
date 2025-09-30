@@ -379,7 +379,7 @@ contract DropAutomation is Ownable {
     function _harvestGaugeRewardsToCbBtc() internal {
         uint256 gaugeCount = aerodromeGauges.length;
         if (gaugeCount == 0) {
-            return;
+            revert("No gauges configured");
         }
 
         for (uint256 i = 0; i < gaugeCount; i++) {
@@ -456,44 +456,54 @@ contract DropAutomation is Ownable {
                 continue;
             }
 
-            IERC20(token).forceApprove(address(AERODROME_CL_ROUTER), amountIn);
-
-            int24 tickSpacing = swapTickSpacing[token];
-            require(tickSpacing > 0, "Tick spacing not configured");
-
-            IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
-                tokenIn: token,
-                tokenOut: address(MAMO_TOKEN),
-                amountIn: amountIn,
-                tickSpacing: tickSpacing,
-                sqrtPriceLimitX96: 0
-            });
-
-            (uint256 quotedAmountOut,,,) = AERODROME_QUOTER.quoteExactInputSingle(params);
-            require(quotedAmountOut > 0, "Invalid quote");
-
-            uint256 minAmountOut = (quotedAmountOut * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
-            require(minAmountOut > 0, "Slippage too high");
-
-            ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
-                tokenIn: token,
-                tokenOut: address(MAMO_TOKEN),
-                tickSpacing: tickSpacing,
-                recipient: address(this),
-                deadline: block.timestamp + SWAP_DEADLINE_BUFFER,
-                amountIn: amountIn,
-                amountOutMinimum: minAmountOut,
-                sqrtPriceLimitX96: 0
-            });
-
-            uint256 amountOut = AERODROME_CL_ROUTER.exactInputSingle(swapParams);
-
-            require(amountOut >= minAmountOut, "Received less than min amount");
-
-            emit TokensSwapped(token, amountIn, amountOut);
-
-            _swapMamoToCbBtc(amountOut);
+            uint256 mamoReceived = _swapToMamo(token, amountIn);
+            _swapMamoToCbBtc(mamoReceived);
         }
+    }
+
+    /**
+     * @notice Swaps a token to MAMO
+     * @param token Address of the token to swap from
+     * @param amountIn Amount of tokens to swap
+     * @return amountOut Amount of MAMO tokens received
+     * @dev Uses Aerodrome CL router with slippage protection
+     */
+    function _swapToMamo(address token, uint256 amountIn) internal returns (uint256 amountOut) {
+        IERC20(token).forceApprove(address(AERODROME_CL_ROUTER), amountIn);
+
+        int24 tickSpacing = swapTickSpacing[token];
+        require(tickSpacing > 0, "Tick spacing not configured");
+
+        IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
+            tokenIn: token,
+            tokenOut: address(MAMO_TOKEN),
+            amountIn: amountIn,
+            tickSpacing: tickSpacing,
+            sqrtPriceLimitX96: 0
+        });
+
+        (uint256 quotedAmountOut,,,) = AERODROME_QUOTER.quoteExactInputSingle(params);
+        require(quotedAmountOut > 0, "Invalid quote");
+
+        uint256 minAmountOut = (quotedAmountOut * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
+        require(minAmountOut > 0, "Slippage too high");
+
+        ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
+            tokenIn: token,
+            tokenOut: address(MAMO_TOKEN),
+            tickSpacing: tickSpacing,
+            recipient: address(this),
+            deadline: block.timestamp + SWAP_DEADLINE_BUFFER,
+            amountIn: amountIn,
+            amountOutMinimum: minAmountOut,
+            sqrtPriceLimitX96: 0
+        });
+
+        amountOut = AERODROME_CL_ROUTER.exactInputSingle(swapParams);
+
+        require(amountOut >= minAmountOut, "Received less than min amount");
+
+        emit TokensSwapped(token, amountIn, amountOut);
     }
 
     /**
