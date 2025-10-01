@@ -60,15 +60,6 @@ contract DropAutomation is Ownable {
     /// @notice Address authorized to trigger reward drops
     address public dedicatedMsgSender;
 
-    /// @notice Tokens that must be swapped to MAMO before calling addRewards
-    address[] private swapTokens;
-
-    /// @notice Helper mapping to check if a token is part of the swap set
-    mapping(address => bool) public isSwapToken;
-
-    /// @notice Tick spacing for each swap token's pool with MAMO
-    mapping(address => int24) public swapTickSpacing;
-
     /// @notice Maximum slippage tolerance in basis points applied to each swap
     uint256 public maxSlippageBps;
 
@@ -81,9 +72,6 @@ contract DropAutomation is Ownable {
 
     event DropCreated(uint256 mamoAmount, uint256 cbBtcAmount);
     event DedicatedMsgSenderUpdated(address indexed oldSender, address indexed newSender);
-    event SwapTokenAdded(address indexed token, int24 tickSpacing);
-    event SwapTokenRemoved(address indexed token);
-    event SwapRouteUpdated(address indexed token, int24 tickSpacing);
     event TokensSwapped(address indexed token, uint256 amountIn, uint256 amountOut);
     event MaxSlippageUpdated(uint256 oldValueBps, uint256 newValueBps);
     event GaugeAdded(address indexed gauge, address indexed rewardToken, address indexed stakingToken);
@@ -148,14 +136,6 @@ contract DropAutomation is Ownable {
     }
 
     /**
-     * @notice Returns the list of tokens configured for MAMO swaps
-     * @return Array of token addresses that will be swapped to MAMO
-     */
-    function getSwapTokens() external view returns (address[] memory) {
-        return swapTokens;
-    }
-
-    /**
      * @notice Harvests gauge rewards and converts to cbBTC (public for testing)
      * @dev Anyone can call this to test gauge reward harvesting without executing full drop
      */
@@ -165,11 +145,19 @@ contract DropAutomation is Ownable {
 
     /**
      * @notice Main automation entry point
-     * @dev Executes earn cycle, swaps configured tokens to MAMO, and forwards rewards to the Safe
+     * @param swapTokens_ Array of token addresses to swap to MAMO then to cbBTC
+     * @param tickSpacings_ Array of tick spacings for each token's pool with MAMO
+     * @dev Executes earn cycle, swaps provided tokens to MAMO, and forwards rewards to the Safe.
+     *      The arrays must be the same length and correspond to each other by index.
      */
-    function createDrop() external onlyDedicatedMsgSender {
+    function createDrop(address[] calldata swapTokens_, int24[] calldata tickSpacings_)
+        external
+        onlyDedicatedMsgSender
+    {
+        require(swapTokens_.length == tickSpacings_.length, "Array length mismatch");
+
         _harvestGaugeRewardsToCbBtc();
-        _swapTokensToMamoAndCbBtc();
+        _swapTokensToMamoAndCbBtc(swapTokens_, tickSpacings_);
 
         uint256 mamoBalance = MAMO_TOKEN.balanceOf(address(this));
         uint256 cbBtcBalance = CBBTC_TOKEN.balanceOf(address(this));
@@ -187,62 +175,6 @@ contract DropAutomation is Ownable {
         SAFE_REWARDS_DISTRIBUTOR_MODULE.addRewards(mamoBalance, cbBtcBalance);
 
         emit DropCreated(mamoBalance, cbBtcBalance);
-    }
-
-    /**
-     * @notice Adds a new token to the swap list
-     * @param token Address of the token to add
-     * @param tickSpacing Tick spacing for the token's pool with MAMO
-     * @dev Only callable by owner. Token must not be MAMO, cbBTC, or already added
-     */
-    function addSwapToken(address token, int24 tickSpacing) external onlyOwner {
-        require(token != address(0), "Invalid token");
-        require(token != address(MAMO_TOKEN), "MAMO excluded");
-        require(token != address(CBBTC_TOKEN), "CBBTC excluded");
-        require(!isSwapToken[token], "Token already added");
-        require(tickSpacing > 0, "Invalid tick spacing");
-
-        swapTokens.push(token);
-        isSwapToken[token] = true;
-        swapTickSpacing[token] = tickSpacing;
-
-        emit SwapTokenAdded(token, tickSpacing);
-    }
-
-    /**
-     * @notice Updates the tick spacing for a configured swap token
-     * @param token Address of the token to update
-     * @param tickSpacing New tick spacing for the token's pool with MAMO
-     * @dev Only callable by owner. Token must already be configured
-     */
-    function setSwapTickSpacing(address token, int24 tickSpacing) external onlyOwner {
-        require(isSwapToken[token], "Token not configured");
-        require(tickSpacing > 0, "Invalid tick spacing");
-        swapTickSpacing[token] = tickSpacing;
-        emit SwapRouteUpdated(token, tickSpacing);
-    }
-
-    /**
-     * @notice Removes a token from the swap list
-     * @param token Address of the token to remove
-     * @dev Only callable by owner. Token must be currently configured
-     */
-    function removeSwapToken(address token) external onlyOwner {
-        require(isSwapToken[token], "Token not configured");
-
-        uint256 length = swapTokens.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (swapTokens[i] == token) {
-                swapTokens[i] = swapTokens[length - 1];
-                swapTokens.pop();
-                break;
-            }
-        }
-
-        isSwapToken[token] = false;
-        delete swapTickSpacing[token];
-
-        emit SwapTokenRemoved(token);
     }
 
     /**
@@ -462,25 +394,27 @@ contract DropAutomation is Ownable {
     }
 
     /**
-     * @notice Swaps all configured tokens to MAMO and then to cbBTC
+     * @notice Swaps provided tokens to MAMO and then to cbBTC
+     * @param swapTokens_ Array of token addresses to swap
+     * @param tickSpacings_ Array of tick spacings for each token's pool with MAMO
      * @dev Iterates through swap tokens, converts each to MAMO, then swaps the received MAMO to cbBTC.
-     *      For each configured swap token:
+     *      For each provided swap token:
      *      1. Checks the contract's balance of the token
      *      2. Skips if balance is zero
      *      3. Calls _swapToMamo() to convert the token to MAMO
      *      4. Calls _swapMamoToCbBtc() to convert the received MAMO to cbBTC
      *      This two-step process allows collecting various tokens from rewards and converting them all to cbBTC.
      */
-    function _swapTokensToMamoAndCbBtc() internal {
-        uint256 length = swapTokens.length;
+    function _swapTokensToMamoAndCbBtc(address[] calldata swapTokens_, int24[] calldata tickSpacings_) internal {
+        uint256 length = swapTokens_.length;
         for (uint256 i = 0; i < length; i++) {
-            address token = swapTokens[i];
+            address token = swapTokens_[i];
             uint256 amountIn = IERC20(token).balanceOf(address(this));
             if (amountIn == 0) {
                 continue;
             }
 
-            uint256 mamoReceived = _swapToMamo(token, amountIn);
+            uint256 mamoReceived = _swapToMamo(token, amountIn, tickSpacings_[i]);
             _swapMamoToCbBtc(mamoReceived);
         }
     }
@@ -489,14 +423,14 @@ contract DropAutomation is Ownable {
      * @notice Swaps a token to MAMO
      * @param token Address of the token to swap from
      * @param amountIn Amount of tokens to swap
+     * @param tickSpacing Tick spacing for the token's pool with MAMO
      * @return amountOut Amount of MAMO tokens received
      * @dev Uses Aerodrome CL router with slippage protection
      */
-    function _swapToMamo(address token, uint256 amountIn) internal returns (uint256 amountOut) {
+    function _swapToMamo(address token, uint256 amountIn, int24 tickSpacing) internal returns (uint256 amountOut) {
         IERC20(token).forceApprove(address(AERODROME_CL_ROUTER), amountIn);
 
-        int24 tickSpacing = swapTickSpacing[token];
-        require(tickSpacing > 0, "Tick spacing not configured");
+        require(tickSpacing > 0, "Invalid tick spacing");
 
         IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
             tokenIn: token,

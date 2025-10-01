@@ -105,36 +105,14 @@ contract DropAutomationSetup is MultisigProposal {
             gaugeContract.deposit(stakedBalance, dropAutomation);
         }
 
-        // 4. Configure swap tokens (WETH, ZORA, EDGE, VIRTUALS)
-        // CL pools on Aerodrome use 200 tick spacing for volatile assets
-        int24 volatileTickSpacing = 200;
-
-        address wethToken = addresses.getAddress("WETH");
-        address zoraToken = addresses.getAddress("ZORA");
-        address edgeToken = addresses.getAddress("EDGE");
-        address virtualsToken = addresses.getAddress("VIRTUALS");
-
         DropAutomation dropAutomationContract = DropAutomation(dropAutomation);
 
-        // 5. Configure gauge for reward harvesting
+        // 4. Configure gauge for reward harvesting
         if (!dropAutomationContract.isConfiguredGauge(gauge)) {
             dropAutomationContract.addGauge(gauge);
         }
 
-        // 6. Add swap tokens if not already configured
-        if (!dropAutomationContract.isSwapToken(wethToken)) {
-            dropAutomationContract.addSwapToken(wethToken, volatileTickSpacing);
-        }
-        if (!dropAutomationContract.isSwapToken(zoraToken)) {
-            dropAutomationContract.addSwapToken(zoraToken, volatileTickSpacing);
-        }
-        if (!dropAutomationContract.isSwapToken(edgeToken)) {
-            dropAutomationContract.addSwapToken(edgeToken, volatileTickSpacing);
-        }
-        if (!dropAutomationContract.isSwapToken(virtualsToken)) {
-            dropAutomationContract.addSwapToken(virtualsToken, volatileTickSpacing);
-        }
-
+        // Note: Swap tokens are now passed as parameters to createDrop() for flexibility
         // Note: BurnAndEarn ownership remains with F-MAMO for governance control
     }
 
@@ -208,23 +186,13 @@ contract DropAutomationSetup is MultisigProposal {
             console.log("LP tokens staked in gauge for DropAutomation:", dropAutomationStakedBalance);
         }
 
-        // Validate swap tokens are configured
-        address wethToken = addresses.getAddress("WETH");
-        address zoraToken = addresses.getAddress("ZORA");
-        address edgeToken = addresses.getAddress("EDGE");
-        address virtualsToken = addresses.getAddress("VIRTUALS");
-
-        assertTrue(dropAutomationContract.isSwapToken(wethToken), "WETH should be configured as swap token");
-        assertTrue(dropAutomationContract.isSwapToken(zoraToken), "ZORA should be configured as swap token");
-        assertTrue(dropAutomationContract.isSwapToken(edgeToken), "EDGE should be configured as swap token");
-        assertTrue(dropAutomationContract.isSwapToken(virtualsToken), "VIRTUALS should be configured as swap token");
-
         console.log("DropAutomation successfully deployed at:", dropAutomation);
         console.log("RewardsDistributorSafeModule admin transferred to DropAutomation");
         console.log("BurnAndEarn fee collector set to DropAutomation");
         console.log("BurnAndEarn ownership remains with F-MAMO for governance control");
-        console.log("Swap tokens configured: WETH, ZORA, EDGE, VIRTUALS");
+        console.log("Gauge configured for reward harvesting");
         console.log("");
+        console.log("NOTE: Swap tokens are now passed as parameters to createDrop() for flexibility");
         console.log("NOTE: Existing factory contracts have immutable feeRecipient addresses.");
         console.log("Future factory deployments should use DropAutomation as the feeRecipient.");
     }

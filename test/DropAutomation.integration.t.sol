@@ -38,9 +38,6 @@ contract DropAutomationIntegrationTest is BaseTest {
 
     // Events to test
     event DedicatedMsgSenderUpdated(address indexed oldSender, address indexed newSender);
-    event SwapTokenAdded(address indexed token, int24 tickSpacing);
-    event SwapTokenRemoved(address indexed token);
-    event SwapRouteUpdated(address indexed token, int24 tickSpacing);
     event MaxSlippageUpdated(uint256 oldValueBps, uint256 newValueBps);
     event DropCreated(uint256 mamoAmount, uint256 cbBtcAmount);
 
@@ -78,10 +75,10 @@ contract DropAutomationIntegrationTest is BaseTest {
         _ensureModuleReady();
 
         // Note: We call the 005_DropAutomationSetup.sol multisig script above for deployment.
-        // The script's build() function would configure swap tokens and gauges in production,
+        // The script's build() function would configure gauges in production,
         // but it uses buildModifier which conflicts with the test environment's vm.prank usage.
         // For tests, we configure manually below to match what the script does in production.
-        _configureSwapTokensAndGauges();
+        _configureGauges();
     }
 
     function testInitialization() public view {
@@ -116,33 +113,6 @@ contract DropAutomationIntegrationTest is BaseTest {
         dropAutomation.setMaxSlippageBps(300);
         assertEq(dropAutomation.maxSlippageBps(), 300, "slippage should be updated");
 
-        // Test addSwapToken
-        address testToken = makeAddr("testToken");
-        vm.expectEmit(true, false, false, true);
-        emit SwapTokenAdded(testToken, 200);
-
-        vm.prank(owner);
-        dropAutomation.addSwapToken(testToken, 200);
-        assertTrue(dropAutomation.isSwapToken(testToken), "token should be added");
-        assertEq(dropAutomation.swapTickSpacing(testToken), 200, "tick spacing should be set");
-
-        // Test setSwapTickSpacing
-        vm.expectEmit(true, false, false, true);
-        emit SwapRouteUpdated(testToken, 100);
-
-        vm.prank(owner);
-        dropAutomation.setSwapTickSpacing(testToken, 100);
-        assertEq(dropAutomation.swapTickSpacing(testToken), 100, "tick spacing should be updated");
-
-        // Test removeSwapToken
-        vm.expectEmit(true, false, false, false);
-        emit SwapTokenRemoved(testToken);
-
-        vm.prank(owner);
-        dropAutomation.removeSwapToken(testToken);
-        assertFalse(dropAutomation.isSwapToken(testToken), "token should be removed");
-        assertEq(dropAutomation.swapTickSpacing(testToken), 0, "tick spacing should be cleared");
-
         // Test recoverERC20
         address recipient = makeAddr("recipient");
         deal(address(mamoToken), address(dropAutomation), 100e18);
@@ -154,7 +124,6 @@ contract DropAutomationIntegrationTest is BaseTest {
 
     function testAccessControl() public {
         address attacker = makeAddr("attacker");
-        address testToken = makeAddr("testToken");
 
         // Test only owner can call setDedicatedMsgSender
         vm.prank(attacker);
@@ -166,33 +135,16 @@ contract DropAutomationIntegrationTest is BaseTest {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
         dropAutomation.setMaxSlippageBps(100);
 
-        // Test only owner can call addSwapToken
-        vm.prank(attacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-        dropAutomation.addSwapToken(testToken, 200);
-
-        // Test only owner can call removeSwapToken
-        vm.prank(owner);
-        dropAutomation.addSwapToken(testToken, 200);
-
-        vm.prank(attacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-        dropAutomation.removeSwapToken(testToken);
-
-        // Test only owner can call setSwapTickSpacing
-        vm.prank(attacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-        dropAutomation.setSwapTickSpacing(testToken, 100);
-
         // Test only owner can call recoverERC20
         vm.prank(attacker);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
         dropAutomation.recoverERC20(address(mamoToken), attacker, 100e18);
 
         // Test only dedicatedMsgSender can call createDrop
+        (address[] memory tokens, int24[] memory tickSpacings) = _getDefaultSwapTokensAndTickSpacings();
         vm.prank(attacker);
         vm.expectRevert(DropAutomation.NotDedicatedSender.selector);
-        dropAutomation.createDrop();
+        dropAutomation.createDrop(tokens, tickSpacings);
     }
 
     function testValidationErrors() public {
@@ -210,45 +162,6 @@ contract DropAutomationIntegrationTest is BaseTest {
         vm.expectRevert(DropAutomation.InvalidSlippage.selector);
         dropAutomation.setMaxSlippageBps(501); // Over 5% cap
 
-        // Test adding invalid swap token
-        vm.prank(owner);
-        vm.expectRevert("Invalid token");
-        dropAutomation.addSwapToken(address(0), 200);
-
-        vm.prank(owner);
-        vm.expectRevert("MAMO excluded");
-        dropAutomation.addSwapToken(address(mamoToken), 200);
-
-        vm.prank(owner);
-        vm.expectRevert("CBBTC excluded");
-        dropAutomation.addSwapToken(address(cbBtcToken), 200);
-
-        // Test adding duplicate token
-        address testToken = makeAddr("testToken");
-        vm.prank(owner);
-        dropAutomation.addSwapToken(testToken, 200);
-
-        vm.prank(owner);
-        vm.expectRevert("Token already added");
-        dropAutomation.addSwapToken(testToken, 200);
-
-        // Test invalid tick spacing
-        address newToken = makeAddr("newToken");
-        vm.prank(owner);
-        vm.expectRevert("Invalid tick spacing");
-        dropAutomation.addSwapToken(newToken, 0);
-
-        // Test removing non-existent token
-        address nonExistentToken = makeAddr("nonExistentToken");
-        vm.prank(owner);
-        vm.expectRevert("Token not configured");
-        dropAutomation.removeSwapToken(nonExistentToken);
-
-        // Test setting tick spacing for non-configured token
-        vm.prank(owner);
-        vm.expectRevert("Token not configured");
-        dropAutomation.setSwapTickSpacing(nonExistentToken, 100);
-
         // Test recoverERC20 with invalid params
         vm.prank(owner);
         vm.expectRevert("Invalid token");
@@ -257,28 +170,13 @@ contract DropAutomationIntegrationTest is BaseTest {
         vm.prank(owner);
         vm.expectRevert("Invalid recipient");
         dropAutomation.recoverERC20(address(mamoToken), address(0), 100e18);
-    }
 
-    function testGetSwapTokens() public {
-        // Initially should have configured tokens from _configureSwapTokens
-        address[] memory tokens = dropAutomation.getSwapTokens();
-        assertEq(tokens.length, 4, "should have 4 tokens initially");
-
-        // Add a new token
-        address newToken = makeAddr("newToken");
-        vm.prank(owner);
-        dropAutomation.addSwapToken(newToken, 200);
-
-        tokens = dropAutomation.getSwapTokens();
-        assertEq(tokens.length, 5, "should have 5 tokens after adding");
-        assertEq(tokens[4], newToken, "new token should be at the end");
-
-        // Remove a token
-        vm.prank(owner);
-        dropAutomation.removeSwapToken(tokens[0]);
-
-        tokens = dropAutomation.getSwapTokens();
-        assertEq(tokens.length, 4, "should have 4 tokens after removing");
+        // Test createDrop with mismatched array lengths
+        address[] memory tokens = new address[](2);
+        int24[] memory tickSpacings = new int24[](1);
+        vm.prank(dedicatedSender);
+        vm.expectRevert("Array length mismatch");
+        dropAutomation.createDrop(tokens, tickSpacings);
     }
 
     function test_createDrop_endToEnd() public {
@@ -297,8 +195,10 @@ contract DropAutomationIntegrationTest is BaseTest {
         uint256 safeMamoBefore = mamoToken.balanceOf(address(fMamoSafe));
         uint256 safeCbBtcBefore = cbBtcToken.balanceOf(address(fMamoSafe));
 
+        (address[] memory swapTokens, int24[] memory tickSpacings) = _getDefaultSwapTokensAndTickSpacings();
+
         vm.prank(dedicatedSender);
-        dropAutomation.createDrop();
+        dropAutomation.createDrop(swapTokens, tickSpacings);
 
         uint256 safeMamoAfter = mamoToken.balanceOf(address(fMamoSafe));
         uint256 safeCbBtcAfter = cbBtcToken.balanceOf(address(fMamoSafe));
@@ -351,26 +251,9 @@ contract DropAutomationIntegrationTest is BaseTest {
         }
     }
 
-    function _configureSwapTokensAndGauges() internal {
+    function _configureGauges() internal {
         // This mirrors what 005_DropAutomationSetup.sol build() does in production
-        // CL pools on Aerodrome use 200 tick spacing for volatile assets
-        int24 volatileTickSpacing = 200;
-
         vm.startPrank(owner);
-
-        // Add swap tokens if not already configured
-        if (!dropAutomation.isSwapToken(address(wethToken))) {
-            dropAutomation.addSwapToken(address(wethToken), volatileTickSpacing);
-        }
-        if (!dropAutomation.isSwapToken(ZORA_TOKEN)) {
-            dropAutomation.addSwapToken(ZORA_TOKEN, volatileTickSpacing);
-        }
-        if (!dropAutomation.isSwapToken(EDGE_TOKEN)) {
-            dropAutomation.addSwapToken(EDGE_TOKEN, volatileTickSpacing);
-        }
-        if (!dropAutomation.isSwapToken(VIRTUALS_TOKEN)) {
-            dropAutomation.addSwapToken(VIRTUALS_TOKEN, volatileTickSpacing);
-        }
 
         // Add gauge if not already configured
         address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
@@ -379,6 +262,26 @@ contract DropAutomationIntegrationTest is BaseTest {
         }
 
         vm.stopPrank();
+    }
+
+    function _getDefaultSwapTokensAndTickSpacings()
+        internal
+        view
+        returns (address[] memory tokens, int24[] memory tickSpacings)
+    {
+        // CL pools on Aerodrome use 200 tick spacing for volatile assets
+        tokens = new address[](4);
+        tickSpacings = new int24[](4);
+
+        tokens[0] = address(wethToken);
+        tokens[1] = ZORA_TOKEN;
+        tokens[2] = EDGE_TOKEN;
+        tokens[3] = VIRTUALS_TOKEN;
+
+        tickSpacings[0] = 200;
+        tickSpacings[1] = 200;
+        tickSpacings[2] = 200;
+        tickSpacings[3] = 200;
     }
 
     function testGaugeConfiguration() public {
