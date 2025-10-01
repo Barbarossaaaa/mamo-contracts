@@ -19,11 +19,14 @@ import {console} from "forge-std/console.sol";
  * @dev This proposal:
  *      1. Deploys the DropAutomation contract (owned by F-MAMO)
  *      2. Transfers RewardsDistributorSafeModule admin from F-MAMO to DropAutomation
- *      3. Sets BurnAndEarn fee collector to DropAutomation
+ *      3. Sets fee collector to DropAutomation for:
+ *         - BurnAndEarn (0xe25e010026692De7A3bb35ef7474cdf4fa1C7e44)
+ *         - BurnAndEarn Virtual MAMO LP (0x79c1921Fc8CD076415cBD1EBB330629F4EC7Bbd1)
+ *         - TransferAndEarn (0x95B0D21bBc973A6aEc501026260e26D333b94d80)
  *      4. Transfers gauge position to DropAutomation
  *      5. Adds USDC-AERO gauge for reward harvesting
- *      6. Configures swap tokens (WETH, ZORA, EDGE, VIRTUALS)
- * Note: BurnAndEarn ownership remains with F-MAMO for governance control
+ * Note: All contract ownerships remain with F-MAMO for governance control
+ * Note: Swap tokens are passed as parameters to createDrop() for flexibility
  */
 contract DropAutomationSetup is MultisigProposal {
     DeployDropAutomation public immutable deployDropAutomation;
@@ -86,9 +89,15 @@ contract DropAutomationSetup is MultisigProposal {
         // 1. Transfer RewardsDistributorSafeModule admin to DropAutomation
         RewardsDistributorSafeModule(rewardsDistributorModule).setAdmin(dropAutomation);
 
-        // 2. Set BurnAndEarn fee collector to DropAutomation
+        // 2. Set fee collector to DropAutomation for all BurnAndEarn/TransferAndEarn contracts
         BurnAndEarn burnAndEarn = BurnAndEarn(burnAndEarnAddress);
         burnAndEarn.setFeeCollector(dropAutomation);
+
+        address burnAndEarnVirtualMamoLP = addresses.getAddress("BURN_AND_EARN_VIRTUAL_MAMO_LP");
+        BurnAndEarn(burnAndEarnVirtualMamoLP).setFeeCollector(dropAutomation);
+
+        address transferAndEarn = addresses.getAddress("TRANSFER_AND_EARN");
+        BurnAndEarn(transferAndEarn).setFeeCollector(dropAutomation);
 
         // 3. Transfer Aerodrome gauge position to DropAutomation
         // First check if F-MAMO has staked LP tokens
@@ -155,7 +164,7 @@ contract DropAutomationSetup is MultisigProposal {
             "RewardsDistributorSafeModule admin should be DropAutomation"
         );
 
-        // Validate BurnAndEarn configuration
+        // Validate BurnAndEarn configuration for all three contracts
         BurnAndEarn burnAndEarn = BurnAndEarn(burnAndEarnAddress);
         assertEq(
             burnAndEarn.feeCollector(),
@@ -166,6 +175,22 @@ contract DropAutomationSetup is MultisigProposal {
             burnAndEarn.owner(),
             fMamoSafe,
             "BurnAndEarn owner should remain F-MAMO for governance"
+        );
+
+        address burnAndEarnVirtualMamoLP = addresses.getAddress("BURN_AND_EARN_VIRTUAL_MAMO_LP");
+        BurnAndEarn burnAndEarnVirtual = BurnAndEarn(burnAndEarnVirtualMamoLP);
+        assertEq(
+            burnAndEarnVirtual.feeCollector(),
+            dropAutomation,
+            "BurnAndEarn Virtual MAMO LP fee collector should be DropAutomation"
+        );
+
+        address transferAndEarn = addresses.getAddress("TRANSFER_AND_EARN");
+        BurnAndEarn transferAndEarnContract = BurnAndEarn(transferAndEarn);
+        assertEq(
+            transferAndEarnContract.feeCollector(),
+            dropAutomation,
+            "TransferAndEarn fee collector should be DropAutomation"
         );
 
         // Validate admin transfers
@@ -188,8 +213,11 @@ contract DropAutomationSetup is MultisigProposal {
 
         console.log("DropAutomation successfully deployed at:", dropAutomation);
         console.log("RewardsDistributorSafeModule admin transferred to DropAutomation");
-        console.log("BurnAndEarn fee collector set to DropAutomation");
-        console.log("BurnAndEarn ownership remains with F-MAMO for governance control");
+        console.log("Fee collector set to DropAutomation for:");
+        console.log("  - BurnAndEarn:", burnAndEarnAddress);
+        console.log("  - BurnAndEarn Virtual MAMO LP:", burnAndEarnVirtualMamoLP);
+        console.log("  - TransferAndEarn:", transferAndEarn);
+        console.log("All contract ownerships remain with F-MAMO for governance control");
         console.log("Gauge configured for reward harvesting");
         console.log("");
         console.log("NOTE: Swap tokens are now passed as parameters to createDrop() for flexibility");
