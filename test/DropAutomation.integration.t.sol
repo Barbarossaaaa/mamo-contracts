@@ -74,10 +74,10 @@ contract DropAutomationIntegrationTest is BaseTest {
 
         _ensureModuleReady();
 
-        // Note: We call the 005_DropAutomationSetup.sol multisig script above for deployment.
-        // The script's build() function would configure gauges in production,
-        // but it uses buildModifier which conflicts with the test environment's vm.prank usage.
-        // For tests, we configure manually below to match what the script does in production.
+        // Note: We call 005_DropAutomationSetup.sol for deployment above.
+        // The script's build() uses buildModifier which creates a snapshot and reverts state at the end
+        // (it's designed to generate calldata for multisig, not to persist state in tests).
+        // So we manually configure gauges to match what the multisig script will do in production.
         _configureGauges();
     }
 
