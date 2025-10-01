@@ -347,12 +347,6 @@ contract DropAutomation is Ownable {
      * @param amountIn Amount of reward tokens to swap
      * @param rewardTokenAddress Address of the reward token to swap from
      * @dev Uses Aerodrome CL router with slippage protection to swap rewards to cbBTC.
-     *      Process:
-     *      1. Approves the Aerodrome router to spend the reward tokens
-     *      2. Gets a price quote from the Aerodrome quoter
-     *      3. Calculates minimum output based on maxSlippageBps
-     *      4. Executes the swap via exactInputSingle
-     *      5. Verifies the received amount meets the minimum
      *      Returns early if amountIn is 0. Uses AERO_CBBTC_TICK_SPACING (200) for the pool.
      */
     function _swapRewardTokenToCbBtc(uint256 amountIn, address rewardTokenAddress) internal {
@@ -360,37 +354,7 @@ contract DropAutomation is Ownable {
             return;
         }
 
-        IERC20 rewardToken = IERC20(rewardTokenAddress);
-        rewardToken.forceApprove(address(AERODROME_CL_ROUTER), amountIn);
-
-        IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
-            tokenIn: rewardTokenAddress,
-            tokenOut: address(CBBTC_TOKEN),
-            amountIn: amountIn,
-            tickSpacing: AERO_CBBTC_TICK_SPACING,
-            sqrtPriceLimitX96: 0
-        });
-
-        (uint256 quotedAmountOut,,,) = AERODROME_QUOTER.quoteExactInputSingle(params);
-        require(quotedAmountOut > 0, "Invalid quote");
-
-        uint256 minAmountOut = (quotedAmountOut * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
-        require(minAmountOut > 0, "Slippage too high");
-
-        ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
-            tokenIn: rewardTokenAddress,
-            tokenOut: address(CBBTC_TOKEN),
-            tickSpacing: AERO_CBBTC_TICK_SPACING,
-            recipient: address(this),
-            deadline: block.timestamp + SWAP_DEADLINE_BUFFER,
-            amountIn: amountIn,
-            amountOutMinimum: minAmountOut,
-            sqrtPriceLimitX96: 0
-        });
-
-        uint256 amountOut = AERODROME_CL_ROUTER.exactInputSingle(swapParams);
-
-        require(amountOut >= minAmountOut, "Received less than min amount");
+        _executeSwap(rewardTokenAddress, address(CBBTC_TOKEN), amountIn, AERO_CBBTC_TICK_SPACING);
     }
 
     /**
@@ -425,16 +389,49 @@ contract DropAutomation is Ownable {
      * @param amountIn Amount of tokens to swap
      * @param tickSpacing Tick spacing for the token's pool with MAMO
      * @return amountOut Amount of MAMO tokens received
-     * @dev Uses Aerodrome CL router with slippage protection
+     * @dev Uses Aerodrome CL router with slippage protection. Emits TokensSwapped event.
      */
     function _swapToMamo(address token, uint256 amountIn, int24 tickSpacing) internal returns (uint256 amountOut) {
-        IERC20(token).forceApprove(address(AERODROME_CL_ROUTER), amountIn);
+        amountOut = _executeSwap(token, address(MAMO_TOKEN), amountIn, tickSpacing);
+        emit TokensSwapped(token, amountIn, amountOut);
+    }
 
+    /**
+     * @notice Swaps MAMO tokens to cbBTC
+     * @param amountIn Amount of MAMO tokens to swap
+     * @dev Uses Aerodrome CL router with slippage protection.
+     *      Uses MAMO_CBBTC_TICK_SPACING (200) for the concentrated liquidity pool.
+     */
+    function _swapMamoToCbBtc(uint256 amountIn) internal {
+        _executeSwap(address(MAMO_TOKEN), address(CBBTC_TOKEN), amountIn, MAMO_CBBTC_TICK_SPACING);
+    }
+
+    /**
+     * @notice Executes a token swap via Aerodrome CL router
+     * @param tokenIn Address of the input token
+     * @param tokenOut Address of the output token
+     * @param amountIn Amount of input tokens to swap
+     * @param tickSpacing Tick spacing for the pool
+     * @return amountOut Amount of output tokens received
+     * @dev Core swap logic with slippage protection.
+     *      Process:
+     *      1. Approves the Aerodrome router to spend input tokens
+     *      2. Gets a price quote from the Aerodrome quoter
+     *      3. Calculates minimum output based on maxSlippageBps tolerance
+     *      4. Executes the swap via exactInputSingle
+     *      5. Verifies the received amount meets the minimum
+     */
+    function _executeSwap(address tokenIn, address tokenOut, uint256 amountIn, int24 tickSpacing)
+        internal
+        returns (uint256 amountOut)
+    {
         require(tickSpacing > 0, "Invalid tick spacing");
 
+        IERC20(tokenIn).forceApprove(address(AERODROME_CL_ROUTER), amountIn);
+
         IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
-            tokenIn: token,
-            tokenOut: address(MAMO_TOKEN),
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
             amountIn: amountIn,
             tickSpacing: tickSpacing,
             sqrtPriceLimitX96: 0
@@ -447,8 +444,8 @@ contract DropAutomation is Ownable {
         require(minAmountOut > 0, "Slippage too high");
 
         ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
-            tokenIn: token,
-            tokenOut: address(MAMO_TOKEN),
+            tokenIn: tokenIn,
+            tokenOut: tokenOut,
             tickSpacing: tickSpacing,
             recipient: address(this),
             deadline: block.timestamp + SWAP_DEADLINE_BUFFER,
@@ -458,53 +455,6 @@ contract DropAutomation is Ownable {
         });
 
         amountOut = AERODROME_CL_ROUTER.exactInputSingle(swapParams);
-
-        require(amountOut >= minAmountOut, "Received less than min amount");
-
-        emit TokensSwapped(token, amountIn, amountOut);
-    }
-
-    /**
-     * @notice Swaps MAMO tokens to cbBTC
-     * @param amountIn Amount of MAMO tokens to swap
-     * @dev Uses Aerodrome CL router with slippage protection.
-     *      Process:
-     *      1. Approves the Aerodrome router to spend MAMO tokens
-     *      2. Gets a price quote from the Aerodrome quoter for MAMO/cbBTC
-     *      3. Calculates minimum output based on maxSlippageBps tolerance
-     *      4. Executes the swap via exactInputSingle on the MAMO/cbBTC pool
-     *      5. Verifies the received cbBTC amount meets the minimum
-     *      Uses MAMO_CBBTC_TICK_SPACING (200) for the concentrated liquidity pool.
-     */
-    function _swapMamoToCbBtc(uint256 amountIn) internal {
-        MAMO_TOKEN.forceApprove(address(AERODROME_CL_ROUTER), amountIn);
-
-        IQuoter.QuoteExactInputSingleParams memory params = IQuoter.QuoteExactInputSingleParams({
-            tokenIn: address(MAMO_TOKEN),
-            tokenOut: address(CBBTC_TOKEN),
-            amountIn: amountIn,
-            tickSpacing: MAMO_CBBTC_TICK_SPACING,
-            sqrtPriceLimitX96: 0
-        });
-
-        (uint256 quotedAmountOut,,,) = AERODROME_QUOTER.quoteExactInputSingle(params);
-        require(quotedAmountOut > 0, "Invalid quote");
-
-        uint256 minAmountOut = (quotedAmountOut * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
-        require(minAmountOut > 0, "Slippage too high");
-
-        ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
-            tokenIn: address(MAMO_TOKEN),
-            tokenOut: address(CBBTC_TOKEN),
-            tickSpacing: MAMO_CBBTC_TICK_SPACING,
-            recipient: address(this),
-            deadline: block.timestamp + SWAP_DEADLINE_BUFFER,
-            amountIn: amountIn,
-            amountOutMinimum: minAmountOut,
-            sqrtPriceLimitX96: 0
-        });
-
-        uint256 amountOut = AERODROME_CL_ROUTER.exactInputSingle(swapParams);
 
         require(amountOut >= minAmountOut, "Received less than min amount");
     }
