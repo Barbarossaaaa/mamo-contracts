@@ -74,7 +74,7 @@ contract DropAutomation is Ownable {
     event DedicatedMsgSenderUpdated(address indexed oldSender, address indexed newSender);
     event TokensSwapped(address indexed token, uint256 amountIn, uint256 amountOut);
     event MaxSlippageUpdated(uint256 oldValueBps, uint256 newValueBps);
-    event GaugeAdded(address indexed gauge, address indexed rewardToken, address indexed stakingToken);
+    event GaugeAdded(address indexed gauge);
     event GaugeRemoved(address indexed gauge);
     event GaugeRewardsHarvested(address indexed gauge, uint256 rewardAmount, uint256 cbBtcAmount);
     event GaugeWithdrawn(address indexed gauge, address indexed recipient, uint256 amount);
@@ -210,18 +210,16 @@ contract DropAutomation is Ownable {
         require(gauge_.code.length > 0, "Gauge not deployed");
         require(!isConfiguredGauge[gauge_], "Gauge already configured");
 
-        // Read tokens directly from gauge contract
-        address rewardToken = IAerodromeGauge(gauge_).rewardToken();
-        address stakingToken = IAerodromeGauge(gauge_).stakingToken();
-        require(rewardToken != address(0), "Invalid reward token");
-        require(stakingToken != address(0), "Invalid staking token");
+        // Validate gauge configuration
+        require(IAerodromeGauge(gauge_).rewardToken() != address(0), "Invalid reward token");
+        require(IAerodromeGauge(gauge_).stakingToken() != address(0), "Invalid staking token");
 
         // Add gauge to array and mappings
         gaugeIndex[gauge_] = aerodromeGauges.length;
         aerodromeGauges.push(IAerodromeGauge(gauge_));
         isConfiguredGauge[gauge_] = true;
 
-        emit GaugeAdded(gauge_, rewardToken, stakingToken);
+        emit GaugeAdded(gauge_);
     }
 
     /**
