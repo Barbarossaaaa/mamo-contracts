@@ -141,10 +141,11 @@ contract DropAutomationIntegrationTest is BaseTest {
         dropAutomation.recoverERC20(address(mamoToken), attacker, 100e18);
 
         // Test only dedicatedMsgSender can call createDrop
-        (address[] memory tokens, int24[] memory tickSpacings) = _getDefaultSwapTokensAndTickSpacings();
+        (address[] memory tokens, int24[] memory tickSpacings, bool[] memory swapDirectToCbBtc) =
+            _getDefaultSwapTokensAndTickSpacings();
         vm.prank(attacker);
         vm.expectRevert(DropAutomation.NotDedicatedSender.selector);
-        dropAutomation.createDrop(tokens, tickSpacings);
+        dropAutomation.createDrop(tokens, tickSpacings, swapDirectToCbBtc);
     }
 
     function testValidationErrors() public {
@@ -174,9 +175,10 @@ contract DropAutomationIntegrationTest is BaseTest {
         // Test createDrop with mismatched array lengths
         address[] memory tokens = new address[](2);
         int24[] memory tickSpacings = new int24[](1);
+        bool[] memory swapDirectToCbBtc = new bool[](2);
         vm.prank(dedicatedSender);
         vm.expectRevert("Array length mismatch");
-        dropAutomation.createDrop(tokens, tickSpacings);
+        dropAutomation.createDrop(tokens, tickSpacings, swapDirectToCbBtc);
     }
 
     function test_createDrop_endToEnd() public {
@@ -195,10 +197,11 @@ contract DropAutomationIntegrationTest is BaseTest {
         uint256 safeMamoBefore = mamoToken.balanceOf(address(fMamoSafe));
         uint256 safeCbBtcBefore = cbBtcToken.balanceOf(address(fMamoSafe));
 
-        (address[] memory swapTokens, int24[] memory tickSpacings) = _getDefaultSwapTokensAndTickSpacings();
+        (address[] memory swapTokens, int24[] memory tickSpacings, bool[] memory swapDirectToCbBtc) =
+            _getDefaultSwapTokensAndTickSpacings();
 
         vm.prank(dedicatedSender);
-        dropAutomation.createDrop(swapTokens, tickSpacings);
+        dropAutomation.createDrop(swapTokens, tickSpacings, swapDirectToCbBtc);
 
         uint256 safeMamoAfter = mamoToken.balanceOf(address(fMamoSafe));
         uint256 safeCbBtcAfter = cbBtcToken.balanceOf(address(fMamoSafe));
@@ -267,21 +270,31 @@ contract DropAutomationIntegrationTest is BaseTest {
     function _getDefaultSwapTokensAndTickSpacings()
         internal
         view
-        returns (address[] memory tokens, int24[] memory tickSpacings)
+        returns (address[] memory tokens, int24[] memory tickSpacings, bool[] memory swapDirectToCbBtc)
     {
         // CL pools on Aerodrome use 200 tick spacing for volatile assets
-        tokens = new address[](4);
-        tickSpacings = new int24[](4);
+        tokens = new address[](5);
+        tickSpacings = new int24[](5);
+        swapDirectToCbBtc = new bool[](5);
 
         tokens[0] = address(wethToken);
         tokens[1] = ZORA_TOKEN;
         tokens[2] = EDGE_TOKEN;
         tokens[3] = VIRTUALS_TOKEN;
+        tokens[4] = addresses.getAddress("AERO");
 
         tickSpacings[0] = 200;
         tickSpacings[1] = 200;
         tickSpacings[2] = 200;
         tickSpacings[3] = 200;
+        tickSpacings[4] = 200; // AERO/cbBTC pool tick spacing
+
+        // First 4 tokens go through MAMO (false), AERO goes direct to cbBTC (true)
+        swapDirectToCbBtc[0] = false;
+        swapDirectToCbBtc[1] = false;
+        swapDirectToCbBtc[2] = false;
+        swapDirectToCbBtc[3] = false;
+        swapDirectToCbBtc[4] = true; // AERO swaps directly to cbBTC
     }
 
     function testGaugeConfiguration() public {
@@ -371,20 +384,19 @@ contract DropAutomationIntegrationTest is BaseTest {
             uint256 aeroBefore = aero.balanceOf(address(dropAutomation));
             uint256 cbBtcBefore = cbBtc.balanceOf(address(dropAutomation));
 
-            // Anyone can call harvestGaugeRewards
-            dropAutomation.harvestGaugeRewards();
+            // Only dedicatedMsgSender can call claimGaugeRewards
+            vm.prank(dedicatedSender);
+            dropAutomation.claimGaugeRewards();
 
-            // Check if rewards were harvested and converted to cbBTC
+            // Check if rewards were claimed (AERO balance should increase, no swapping yet)
             uint256 aeroAfter = aero.balanceOf(address(dropAutomation));
+
+            // AERO balance should increase or stay same (claiming only, no swapping)
+            assertGe(aeroAfter, aeroBefore, "AERO should be claimed from gauge");
+
+            // cbBTC balance should not change (no swapping in claimGaugeRewards)
             uint256 cbBtcAfter = cbBtc.balanceOf(address(dropAutomation));
-
-            // AERO should be swapped away (balance should be same or less)
-            assertLe(aeroAfter, aeroBefore, "AERO should be swapped to cbBTC");
-
-            // cbBTC balance should increase if there were rewards
-            if (aeroAfter < aeroBefore || gaugeContract.earned(address(dropAutomation)) > 0) {
-                assertGt(cbBtcAfter, cbBtcBefore, "cbBTC balance should increase from AERO swap");
-            }
+            assertEq(cbBtcAfter, cbBtcBefore, "cbBTC should not change during claim");
         }
     }
 
@@ -542,8 +554,8 @@ contract DropAutomationIntegrationTest is BaseTest {
         assertFalse(dropAutomation.isConfiguredGauge(gauge), "gauge should not be configured after removal");
 
         // Now can add it again
-        vm.expectEmit(true, true, true, true);
-        emit GaugeAdded(gauge, aeroToken, stakingToken);
+        vm.expectEmit(true, false, false, false);
+        emit GaugeAdded(gauge);
 
         vm.prank(owner);
         dropAutomation.addGauge(gauge);
@@ -556,5 +568,5 @@ contract DropAutomationIntegrationTest is BaseTest {
 
     // Update event definitions for the test
     event TokensRecovered(address indexed token, address indexed to, uint256 amount);
-    event GaugeAdded(address indexed gauge, address indexed rewardToken, address indexed stakingToken);
+    event GaugeAdded(address indexed gauge);
 }

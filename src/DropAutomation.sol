@@ -76,7 +76,6 @@ contract DropAutomation is Ownable {
     event MaxSlippageUpdated(uint256 oldValueBps, uint256 newValueBps);
     event GaugeAdded(address indexed gauge);
     event GaugeRemoved(address indexed gauge);
-    event GaugeRewardsHarvested(address indexed gauge, uint256 rewardAmount, uint256 cbBtcAmount);
     event GaugeWithdrawn(address indexed gauge, address indexed recipient, uint256 amount);
     event TokensRecovered(address indexed token, address indexed to, uint256 amount);
 
@@ -136,28 +135,37 @@ contract DropAutomation is Ownable {
     }
 
     /**
-     * @notice Harvests gauge rewards and converts to cbBTC (public for testing)
-     * @dev Anyone can call this to test gauge reward harvesting without executing full drop
+     * @notice Claims rewards from all configured Aerodrome gauges
+     * @dev Only claims rewards without swapping. Call this before createDrop().
+     *      Can be called by anyone. Iterates through all gauges and calls getReward().
      */
-    function harvestGaugeRewards() external {
-        _harvestGaugeRewardsToCbBtc();
+    function claimGaugeRewards() external onlyDedicatedMsgSender {
+        uint256 gaugeCount = aerodromeGauges.length;
+        require(gaugeCount > 0, "No gauges configured");
+
+        for (uint256 i = 0; i < gaugeCount; i++) {
+            aerodromeGauges[i].getReward(address(this));
+        }
     }
 
     /**
-     * @notice Main automation entry point
-     * @param swapTokens_ Array of token addresses to swap to MAMO then to cbBTC
-     * @param tickSpacings_ Array of tick spacings for each token's pool with MAMO
-     * @dev Executes earn cycle, swaps provided tokens to MAMO, and forwards rewards to the Safe.
-     *      The arrays must be the same length and correspond to each other by index.
+     * @notice Main automation entry point to swap tokens and create reward drop
+     * @param swapTokens_ Array of token addresses to swap
+     * @param tickSpacings_ Array of tick spacings for each token's pool
+     * @param swapDirectToCbBtc_ Array of booleans indicating if token swaps directly to cbBTC (true) or through MAMO (false)
+     * @dev Call claimGaugeRewards() before this function to claim gauge rewards.
+     *      Swaps all provided tokens and forwards the resulting MAMO/cbBTC to the Safe.
+     *      All arrays must be the same length and correspond to each other by index.
      */
-    function createDrop(address[] calldata swapTokens_, int24[] calldata tickSpacings_)
-        external
-        onlyDedicatedMsgSender
-    {
+    function createDrop(
+        address[] calldata swapTokens_,
+        int24[] calldata tickSpacings_,
+        bool[] calldata swapDirectToCbBtc_
+    ) external onlyDedicatedMsgSender {
         require(swapTokens_.length == tickSpacings_.length, "Array length mismatch");
+        require(swapTokens_.length == swapDirectToCbBtc_.length, "Direct swap array length mismatch");
 
-        _harvestGaugeRewardsToCbBtc();
-        _swapTokensToMamoAndCbBtc(swapTokens_, tickSpacings_);
+        _swapTokensToMamoAndCbBtc(swapTokens_, tickSpacings_, swapDirectToCbBtc_);
 
         uint256 mamoBalance = MAMO_TOKEN.balanceOf(address(this));
         uint256 cbBtcBalance = CBBTC_TOKEN.balanceOf(address(this));
@@ -303,71 +311,23 @@ contract DropAutomation is Ownable {
     }
 
     /**
-     * @notice Harvests rewards from all configured gauges and converts to cbBTC
-     * @dev Iterates through all configured gauges, harvests rewards, and swaps to cbBTC.
-     *      For each gauge:
-     *      1. Claims rewards by calling gauge.getReward()
-     *      2. Swaps the received reward tokens to cbBTC via Aerodrome
-     *      3. Emits GaugeRewardsHarvested event with the amounts
-     *      Reverts if no gauges are configured. Skips gauges with zero rewards.
-     */
-    function _harvestGaugeRewardsToCbBtc() internal {
-        uint256 gaugeCount = aerodromeGauges.length;
-        if (gaugeCount == 0) {
-            revert("No gauges configured");
-        }
-
-        for (uint256 i = 0; i < gaugeCount; i++) {
-            IAerodromeGauge gauge = aerodromeGauges[i];
-            address rewardTokenAddress = gauge.rewardToken();
-            IERC20 rewardToken = IERC20(rewardTokenAddress);
-
-            uint256 rewardBalanceBefore = rewardToken.balanceOf(address(this));
-            uint256 cbBtcBalanceBefore = CBBTC_TOKEN.balanceOf(address(this));
-
-            gauge.getReward(address(this));
-
-            uint256 rewardBalanceAfter = rewardToken.balanceOf(address(this));
-            if (rewardBalanceAfter == 0) {
-                continue;
-            }
-
-            _swapRewardTokenToCbBtc(rewardBalanceAfter, rewardTokenAddress);
-
-            uint256 cbBtcBalanceAfter = CBBTC_TOKEN.balanceOf(address(this));
-            uint256 harvested = rewardBalanceAfter > rewardBalanceBefore ? rewardBalanceAfter - rewardBalanceBefore : 0;
-            emit GaugeRewardsHarvested(address(gauge), harvested, cbBtcBalanceAfter - cbBtcBalanceBefore);
-        }
-    }
-
-    /**
-     * @notice Swaps reward tokens from gauges to cbBTC
-     * @param amountIn Amount of reward tokens to swap
-     * @param rewardTokenAddress Address of the reward token to swap from
-     * @dev Uses Aerodrome CL router with slippage protection to swap rewards to cbBTC.
-     *      Returns early if amountIn is 0. Uses AERO_CBBTC_TICK_SPACING (200) for the pool.
-     */
-    function _swapRewardTokenToCbBtc(uint256 amountIn, address rewardTokenAddress) internal {
-        if (amountIn == 0) {
-            return;
-        }
-
-        _executeSwap(rewardTokenAddress, address(CBBTC_TOKEN), amountIn, AERO_CBBTC_TICK_SPACING);
-    }
-
-    /**
      * @notice Swaps provided tokens to MAMO and then to cbBTC
      * @param swapTokens_ Array of token addresses to swap
-     * @param tickSpacings_ Array of tick spacings for each token's pool with MAMO
-     * @dev Iterates through swap tokens, converts each to MAMO, then swaps the received MAMO to cbBTC.
-     *      For each provided swap token:
-     *      1. Checks the contract's balance of the token
+     * @param tickSpacings_ Array of tick spacings for each token's pool
+     * @param swapDirectToCbBtc_ Array of booleans indicating swap routing for each token
+     * @dev Swaps tokens based on their routing specified by swapDirectToCbBtc_:
+     *      - true: Direct swap to cbBTC (e.g., AERO which has no MAMO pool)
+     *      - false: Swap to MAMO first, then MAMO to cbBTC
+     *      For each token:
+     *      1. Checks the contract's balance
      *      2. Skips if balance is zero
-     *      3. Calls _swapToMamo() to convert the token to MAMO
-     *      4. Calls _swapMamoToCbBtc() to convert the received MAMO to cbBTC
-     *      This two-step process allows collecting various tokens from rewards and converting them all to cbBTC.
+     *      3. Executes appropriate swap path based on routing flag
      */
-    function _swapTokensToMamoAndCbBtc(address[] calldata swapTokens_, int24[] calldata tickSpacings_) internal {
+    function _swapTokensToMamoAndCbBtc(
+        address[] calldata swapTokens_,
+        int24[] calldata tickSpacings_,
+        bool[] calldata swapDirectToCbBtc_
+    ) internal {
         uint256 length = swapTokens_.length;
         for (uint256 i = 0; i < length; i++) {
             address token = swapTokens_[i];
@@ -376,8 +336,15 @@ contract DropAutomation is Ownable {
                 continue;
             }
 
-            uint256 mamoReceived = _swapToMamo(token, amountIn, tickSpacings_[i]);
-            _swapMamoToCbBtc(mamoReceived);
+            if (swapDirectToCbBtc_[i]) {
+                // Direct swap to cbBTC (e.g., AERO)
+                _executeSwap(token, address(CBBTC_TOKEN), amountIn, tickSpacings_[i]);
+                emit TokensSwapped(token, amountIn, CBBTC_TOKEN.balanceOf(address(this)));
+            } else {
+                // Swap to MAMO first, then MAMO to cbBTC
+                uint256 mamoReceived = _swapToMamo(token, amountIn, tickSpacings_[i]);
+                _swapMamoToCbBtc(mamoReceived);
+            }
         }
     }
 
