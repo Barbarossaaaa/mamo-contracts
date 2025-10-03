@@ -74,11 +74,9 @@ contract DropAutomationIntegrationTest is BaseTest {
 
         _ensureModuleReady();
 
-        // Note: We call 005_DropAutomationSetup.sol for deployment above.
-        // The script's build() uses buildModifier which creates a snapshot and reverts state at the end
-        // (it's designed to generate calldata for multisig, not to persist state in tests).
-        // So we manually configure gauges to match what the multisig script will do in production.
-        _configureGauges();
+        setupScript.build();
+        setupScript.simulate();
+        setupScript.validate();
     }
 
     function testInitialization() public view {
@@ -254,19 +252,6 @@ contract DropAutomationIntegrationTest is BaseTest {
         }
     }
 
-    function _configureGauges() internal {
-        // This mirrors what 005_DropAutomationSetup.sol build() does in production
-        vm.startPrank(owner);
-
-        // Add gauge if not already configured
-        address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
-        if (!dropAutomation.isConfiguredGauge(gauge)) {
-            dropAutomation.addGauge(gauge);
-        }
-
-        vm.stopPrank();
-    }
-
     function _getDefaultSwapTokensAndTickSpacings()
         internal
         view
@@ -408,7 +393,10 @@ contract DropAutomationIntegrationTest is BaseTest {
         IAerodromeGauge gaugeContract = IAerodromeGauge(gauge);
         IERC20 lpToken = IERC20(stakingToken);
 
-        // Deal and stake LP tokens directly to gauge for DropAutomation
+        // Get existing staked balance from FPS setup
+        uint256 existingBalance = gaugeContract.balanceOf(address(dropAutomation));
+
+        // Deal and stake additional LP tokens directly to gauge for DropAutomation
         uint256 amount = 1e18;
         deal(stakingToken, address(this), amount);
 
@@ -416,7 +404,7 @@ contract DropAutomationIntegrationTest is BaseTest {
         gaugeContract.deposit(amount, address(dropAutomation));
 
         uint256 stakedBalance = gaugeContract.balanceOf(address(dropAutomation));
-        assertEq(stakedBalance, amount, "Should have staked balance");
+        assertEq(stakedBalance, existingBalance + amount, "Should have staked balance");
 
         // Only owner can withdraw
         address nonOwner = makeAddr("nonOwner");
@@ -424,13 +412,17 @@ contract DropAutomationIntegrationTest is BaseTest {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         dropAutomation.withdrawGauge(gauge, amount, makeAddr("recipient"));
 
-        // Owner withdraws
+        // Owner withdraws the amount we just added
         address recipient = makeAddr("recipient");
         vm.prank(owner);
         dropAutomation.withdrawGauge(gauge, amount, recipient);
 
-        // Verify withdrawal
-        assertEq(gaugeContract.balanceOf(address(dropAutomation)), 0, "Staked balance should be 0");
+        // Verify withdrawal - should have original balance minus what we withdrew
+        assertEq(
+            gaugeContract.balanceOf(address(dropAutomation)),
+            existingBalance,
+            "Staked balance should be back to original"
+        );
         assertEq(lpToken.balanceOf(recipient), amount, "Recipient should receive LP tokens");
     }
 
