@@ -427,7 +427,6 @@ contract StrategyFactoryTest is Test {
         );
     }
 
-
     function testConstructorWithEmptyRewardTokens() public {
         address[] memory emptyRewardTokens = new address[](0);
 
