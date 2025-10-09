@@ -56,7 +56,7 @@ contract RewardsDistributorSafeModuleIntegrationTest is BaseTest {
         }
     }
 
-    function test_enableModuleOnSafe() public {
+    function test_enableModuleOnSafe() public view {
         // Test that the module exists and has code
         assertTrue(address(module) != address(0));
         assertTrue(address(module).code.length > 0);

@@ -427,30 +427,6 @@ contract StrategyFactoryTest is Test {
         );
     }
 
-    function testRevertIfImplementationNotWhitelisted() public {
-        // Deploy a non-whitelisted implementation
-        MockERC20MoonwellMorphoStrategy nonWhitelistedImpl = new MockERC20MoonwellMorphoStrategy();
-
-        vm.expectRevert("Implementation not whitelisted");
-        new StrategyFactory(
-            address(mockRegistry),
-            mamoBackend,
-            mToken,
-            metaMorphoVault,
-            token,
-            slippagePriceChecker,
-            address(nonWhitelistedImpl), // Not whitelisted
-            feeRecipient,
-            SPLIT_M_TOKEN,
-            SPLIT_VAULT,
-            STRATEGY_TYPE_ID,
-            HOOK_GAS_LIMIT,
-            ALLOWED_SLIPPAGE_IN_BPS,
-            COMPOUND_FEE,
-            rewardTokens
-        );
-    }
-
     function testConstructorWithEmptyRewardTokens() public {
         address[] memory emptyRewardTokens = new address[](0);
 

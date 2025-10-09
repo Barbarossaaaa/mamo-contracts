@@ -115,12 +115,6 @@ contract StrategyFactory {
 
         // Initialize the MamoStrategyRegistry reference
         mamoStrategyRegistryInterface = IMamoStrategyRegistry(_mamoStrategyRegistry);
-
-        // Validate that the implementation is whitelisted
-        require(
-            mamoStrategyRegistryInterface.whitelistedImplementations(_strategyImplementation),
-            "Implementation not whitelisted"
-        );
     }
 
     /**

@@ -19,7 +19,7 @@ bnb = { endpoint= "${BNB_RPC_URL}", retries = 3, retry_backoff = 1000 }
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 
 [etherscan]
-base = { key = "${BASESCAN_API_KEY}", url= "https://api.basescan.org/api" }
+base = { key = "${BASESCAN_API_KEY}", url= "https://api.etherscan.io/v2/api?chainid=8453" }
 bnb = { key = "${BNBSCAN_API_KEY}", url= "https://api.bscscan.com/api" }
 
 [profile.lint]
