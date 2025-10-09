@@ -315,6 +315,36 @@
     "isContract": true
   },
   {
+    "addr": "0xb13dfF43b43c69C0CfE56D48e63EaF0E7Aab543e",
+    "name": "GELATO_SENDER",
+    "isContract": true
+  },
+  {
+    "addr": "0x4F09bAb2f0E15e2A078A227FE1537665F55b8360",
+    "name": "AERODROME_USDC_AERO_GAUGE",
+    "isContract": true
+  },
+  {
+    "addr": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+    "name": "AERO",
+    "isContract": true
+  },
+  {
+    "addr": "0x6cDcb1C4A4D1C3C6d054b27AC5B77e89eAFb971d",
+    "name": "AERO_STAKING_TOKEN",
+    "isContract": true
+  },
+  {
+    "addr": "0x1111111111166b7FE7bd91427724B487980aFc69",
+    "name": "ZORA",
+    "isContract": true
+  },
+  {
+    "addr": "0xED6E000dEF95780fb89734c07EE2ce9F6dcAf110",
+    "name": "EDGE",
+    "isContract": true
+  },
+  {
     "addr": "0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae",
     "name": "MERKLE_PROTOCOL_DISTRIBUTOR",
     "isContract": true
