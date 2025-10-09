@@ -76,7 +76,7 @@
   },
   {
     "addr": "0x5fAB373f43079CE488C2b8579751791982C03A35",
-    "name": "MOONWELL_MORPHO_STRATEGY_IMPL",
+    "name": "MOONWELL_MORPHO_STRATEGY_IMPL_DEPRECATED",
     "isContract": true
   },
   {
@@ -155,12 +155,12 @@
     "isContract": true
   },
   {
-    "addr": "0x20C444BEd40faFee49222eE9A480937b825282DC",
+    "addr": "0xf8CFdEf5068929e022a50315983043b61E9987f8",
     "name": "cbBTC_STRATEGY_FACTORY",
     "isContract": true
   },
   {
-    "addr": "0x1Eeb3FD8C8302dAf6BC265a6B8a5C397d89DE286",
+    "addr": "0x3098360e627E84Fb9dD621F01ea03E325cCEE2c6",
     "name": "USDC_STRATEGY_FACTORY",
     "isContract": true
   },
@@ -312,6 +312,26 @@
   {
     "addr": "0x6f85D661961c9A265776E2A3CCFcdf3a542d6Da2",
     "name": "REWARDS_DISTRIBUTOR_MAMO_VIRTUALS_DEPRECATED",
+    "isContract": true
+  },
+  {
+    "addr": "0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae",
+    "name": "MERKLE_PROTOCOL_DISTRIBUTOR",
+    "isContract": true
+  },
+  {
+    "addr": "0x4007EFfCE837701Fdd90017Ab747fefD58aAD98B",
+    "name": "MOONWELL_MORPHO_STRATEGY_IMPL",
+    "isContract": true
+  },
+  {
+    "addr": "0x20C444BEd40faFee49222eE9A480937b825282DC",
+    "name": "cbBTC_STRATEGY_FACTORY_DEPRECATED",
+    "isContract": true
+  },
+  {
+    "addr": "0x1Eeb3FD8C8302dAf6BC265a6B8a5C397d89DE286",
+    "name": "USDC_STRATEGY_FACTORY_DEPRECATED",
     "isContract": true
   }
 ]

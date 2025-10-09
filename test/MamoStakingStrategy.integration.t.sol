@@ -52,7 +52,7 @@ contract MamoStakingStrategyIntegrationTest is BaseTest {
     }
 
     // Test basic deployment and functionality
-    function testDeploymentWasSuccessful() public {
+    function testDeploymentWasSuccessful() public view {
         // Verify all contracts were deployed
         assertTrue(address(stakingRegistry) != address(0), "MamoStakingRegistry should be deployed");
         assertTrue(address(stakingStrategyFactory) != address(0), "MamoStakingStrategyFactory should be deployed");
@@ -71,7 +71,7 @@ contract MamoStakingStrategyIntegrationTest is BaseTest {
         );
     }
 
-    function testMultiRewardsConfiguration() public {
+    function testMultiRewardsConfiguration() public view {
         // Verify MultiRewards is configured with MAMO as staking token
         address mamoTokenAddr = addresses.getAddress("MAMO");
         assertEq(address(mamoToken), mamoTokenAddr, "MAMO token address should match");
@@ -80,7 +80,7 @@ contract MamoStakingStrategyIntegrationTest is BaseTest {
         assertTrue(address(multiRewards).code.length > 0, "MultiRewards should have code");
     }
 
-    function testStakingRegistryConfiguration() public {
+    function testStakingRegistryConfiguration() public view {
         // Verify staking registry configuration
         assertEq(stakingRegistry.mamoToken(), address(mamoToken), "Staking registry should have correct MAMO token");
         assertEq(stakingRegistry.defaultSlippageInBps(), 100, "Staking registry should have correct default slippage");
@@ -1177,7 +1177,7 @@ contract MamoStakingStrategyIntegrationTest is BaseTest {
         uint256 cbBTCRewardAmount = 1 * 10 ** 8; // cbBTC has 8 decimals
 
         // Setup cbBTC strategy owned by the same user but not in registry
-        address cbBTCStrategy = _setupCbBTCStrategy(user);
+        _setupCbBTCStrategy(user);
 
         // Test with a fake address that simulates an unregistered strategy
         // We'll create a simple contract that pretends to be a strategy but isn't registered

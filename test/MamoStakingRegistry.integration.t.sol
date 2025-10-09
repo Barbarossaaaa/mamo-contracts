@@ -53,7 +53,7 @@ contract MamoStakingRegistryIntegrationTest is BaseTest {
 
     // ========== DEPLOYMENT TESTS ==========
 
-    function testDeploymentWasSuccessful() public {
+    function testDeploymentWasSuccessful() public view {
         // Verify contract state
         assertTrue(address(stakingRegistry) != address(0), "Registry should be deployed");
         assertEq(stakingRegistry.mamoToken(), mamoToken, "Should have correct MAMO token");
@@ -63,7 +63,7 @@ contract MamoStakingRegistryIntegrationTest is BaseTest {
         assertEq(stakingRegistry.MAX_SLIPPAGE_IN_BPS(), MAX_SLIPPAGE, "Should have correct max slippage");
     }
 
-    function testRolesWereGrantedCorrectly() public {
+    function testRolesWereGrantedCorrectly() public view {
         // Check admin role
         assertTrue(
             stakingRegistry.hasRole(stakingRegistry.DEFAULT_ADMIN_ROLE(), admin), "Admin should have DEFAULT_ADMIN_ROLE"
@@ -78,7 +78,7 @@ contract MamoStakingRegistryIntegrationTest is BaseTest {
         );
     }
 
-    function testInitialRewardTokensSetup() public {
+    function testInitialRewardTokensSetup() public view {
         // Check that cbBTC was added as a reward token during deployment
         address cbBTC = addresses.getAddress("cbBTC");
         assertTrue(stakingRegistry.isRewardToken(cbBTC), "cbBTC should be a reward token");
@@ -450,7 +450,7 @@ contract MamoStakingRegistryIntegrationTest is BaseTest {
 
     // ========== VIEW FUNCTION TESTS ==========
 
-    function testGetRewardTokenAtValidIndex() public {
+    function testGetRewardTokenAtValidIndex() public view {
         // cbBTC should be at index 0 from deployment
         MamoStakingRegistry.RewardToken memory token = stakingRegistry.getRewardToken(0);
         address cbBTC = addresses.getAddress("cbBTC");

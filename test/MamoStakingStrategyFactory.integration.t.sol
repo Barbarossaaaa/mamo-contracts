@@ -44,7 +44,7 @@ contract MamoStakingStrategyFactoryIntegrationTest is BaseTest {
 
     // ========== FACTORY DEPLOYMENT TESTS ==========
 
-    function testDeploymentWasSuccessful() public {
+    function testDeploymentWasSuccessful() public view {
         // Verify all contracts were deployed
         assertTrue(address(stakingRegistry) != address(0), "MamoStakingRegistry should be deployed");
         assertTrue(address(stakingStrategyFactory) != address(0), "MamoStakingStrategyFactory should be deployed");
@@ -63,7 +63,7 @@ contract MamoStakingStrategyFactoryIntegrationTest is BaseTest {
         );
     }
 
-    function testFactoryValidatesConfiguration() public {
+    function testFactoryValidatesConfiguration() public view {
         // Verify factory was deployed with correct parameters
         assertEq(stakingStrategyFactory.strategyTypeId(), 3, "Factory should have correct strategy type ID");
         assertEq(stakingStrategyFactory.defaultSlippageInBps(), 100, "Factory should have correct default slippage");
@@ -129,7 +129,7 @@ contract MamoStakingStrategyFactoryIntegrationTest is BaseTest {
 
     // ========== STRATEGY ADDRESS COMPUTATION TESTS ==========
 
-    function testComputeStrategyAddressIsConsistent() public {
+    function testComputeStrategyAddressIsConsistent() public view {
         address computedAddress1 = stakingStrategyFactory.computeStrategyAddress(user);
         address computedAddress2 = stakingStrategyFactory.computeStrategyAddress(user);
 
@@ -177,7 +177,7 @@ contract MamoStakingStrategyFactoryIntegrationTest is BaseTest {
         vm.stopPrank();
     }
 
-    function testFactoryHasCorrectRoles() public {
+    function testFactoryHasCorrectRoles() public view {
         // Verify factory has correct role assignments
         assertTrue(
             stakingStrategyFactory.hasRole(stakingStrategyFactory.DEFAULT_ADMIN_ROLE(), addresses.getAddress("F-MAMO")),
@@ -263,7 +263,7 @@ contract MamoStakingStrategyFactoryIntegrationTest is BaseTest {
 
     // ========== EDGE CASES AND ERROR HANDLING ==========
 
-    function testCreateStrategyWithMaxSlippage() public {
+    function testCreateStrategyWithMaxSlippage() public view {
         // This test verifies that the factory properly handles maximum slippage values
         // The factory is initialized with defaultSlippageInBps which should be within limits
         uint256 maxSlippage = stakingStrategyFactory.MAX_SLIPPAGE_IN_BPS();
@@ -272,7 +272,7 @@ contract MamoStakingStrategyFactoryIntegrationTest is BaseTest {
         assertTrue(factorySlippage <= maxSlippage, "Factory slippage should be within max limits");
     }
 
-    function testFactoryImmutableParameters() public {
+    function testFactoryImmutableParameters() public view {
         // Verify that all immutable parameters are correctly set
         assertEq(
             stakingStrategyFactory.mamoStrategyRegistry(), address(mamoStrategyRegistry), "Registry should be correct"

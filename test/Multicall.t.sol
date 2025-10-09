@@ -523,6 +523,8 @@ contract MulticallTest is Test {
         (uint256 split2A, uint256 split2B) = strategy2.getCurrentSplit();
         assertEq(split1A, SPLIT_MOONWELL, "Strategy1 should be updated");
         assertEq(split2A, SPLIT_MOONWELL, "Strategy2 should be updated");
+        assertEq(split1B, SPLIT_MORPHO, "Strategy1 should be updated");
+        assertEq(split2B, SPLIT_MORPHO, "Strategy2 should be updated");
 
         // Verify full refund (all calls had zero value)
         assertEq(multicallOwner.balance, initialBalance, "Owner should get full refund");
@@ -559,6 +561,8 @@ contract MulticallTest is Test {
         (uint256 split2A, uint256 split2B) = strategy2.getCurrentSplit();
         assertEq(split1A, SPLIT_MOONWELL, "Strategy1 should be updated");
         assertEq(split2A, SPLIT_MOONWELL, "Strategy2 should be updated");
+        assertEq(split1B, SPLIT_MORPHO, "Strategy1 should be updated");
+        assertEq(split2B, SPLIT_MORPHO, "Strategy2 should be updated");
 
         // Verify payable contract received ETH
         assertEq(payableContract1.receivedETH(), 0.3 ether, "PayableContract should receive 0.3 ether");
