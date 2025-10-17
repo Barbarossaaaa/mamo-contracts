@@ -116,7 +116,6 @@ contract DropAutomation is Ownable {
         address aerodromeRouter_,
         address aerodromeQuoter_
     ) Ownable(owner_) {
-        require(owner_ != address(0), "Invalid owner");
         require(dedicatedMsgSender_ != address(0), "Invalid dedicated sender");
         require(mamoToken_ != address(0), "Invalid MAMO token");
         require(cbBtcToken_ != address(0), "Invalid cbBTC token");
