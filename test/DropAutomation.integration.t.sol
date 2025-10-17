@@ -141,9 +141,10 @@ contract DropAutomationIntegrationTest is BaseTest {
         // Test only dedicatedMsgSender can call createDrop
         (address[] memory tokens, int24[] memory tickSpacings, bool[] memory swapDirectToCbBtc) =
             _getDefaultSwapTokensAndTickSpacings();
+        uint256[] memory minAmounts = new uint256[](tokens.length);
         vm.prank(attacker);
         vm.expectRevert(DropAutomation.NotDedicatedSender.selector);
-        dropAutomation.createDrop(tokens, tickSpacings, swapDirectToCbBtc);
+        dropAutomation.createDrop(tokens, tickSpacings, swapDirectToCbBtc, minAmounts);
     }
 
     function testValidationErrors() public {
@@ -174,9 +175,10 @@ contract DropAutomationIntegrationTest is BaseTest {
         address[] memory tokens = new address[](2);
         int24[] memory tickSpacings = new int24[](1);
         bool[] memory swapDirectToCbBtc = new bool[](2);
+        uint256[] memory minAmounts = new uint256[](2);
         vm.prank(dedicatedSender);
         vm.expectRevert("Array length mismatch");
-        dropAutomation.createDrop(tokens, tickSpacings, swapDirectToCbBtc);
+        dropAutomation.createDrop(tokens, tickSpacings, swapDirectToCbBtc, minAmounts);
     }
 
     function test_createDrop_endToEnd() public {
@@ -198,8 +200,11 @@ contract DropAutomationIntegrationTest is BaseTest {
         (address[] memory swapTokens, int24[] memory tickSpacings, bool[] memory swapDirectToCbBtc) =
             _getDefaultSwapTokensAndTickSpacings();
 
+        // Use 0 for all minimums to allow any output (no MEV protection in test)
+        uint256[] memory minAmounts = new uint256[](swapTokens.length);
+
         vm.prank(dedicatedSender);
-        dropAutomation.createDrop(swapTokens, tickSpacings, swapDirectToCbBtc);
+        dropAutomation.createDrop(swapTokens, tickSpacings, swapDirectToCbBtc, minAmounts);
 
         uint256 safeMamoAfter = mamoToken.balanceOf(address(fMamoSafe));
         uint256 safeCbBtcAfter = cbBtcToken.balanceOf(address(fMamoSafe));

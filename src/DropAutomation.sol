@@ -83,6 +83,7 @@ contract DropAutomation is Ownable {
     error NotDedicatedSender();
     error InvalidSlippage();
     error GaugeNotConfigured();
+    error InsufficientOutput();
 
     /**
      * @notice Restricts function access to the dedicated message sender
@@ -159,19 +160,23 @@ contract DropAutomation is Ownable {
      * @param swapTokens_ Array of token addresses to swap
      * @param tickSpacings_ Array of tick spacings for each token's pool
      * @param swapDirectToCbBtc_ Array of booleans indicating if token swaps directly to cbBTC (true) or through MAMO (false)
+     * @param minAmountOuts_ Array of minimum output amounts (in final token) for MEV protection
      * @dev Call claimGaugeRewards() before this function to claim gauge rewards.
      *      Swaps all provided tokens and forwards the resulting MAMO/cbBTC to the Safe.
      *      All arrays must be the same length and correspond to each other by index.
+     *      minAmountOuts_ should be calculated off-chain based on fair market prices to prevent MEV.
      */
     function createDrop(
         address[] calldata swapTokens_,
         int24[] calldata tickSpacings_,
-        bool[] calldata swapDirectToCbBtc_
+        bool[] calldata swapDirectToCbBtc_,
+        uint256[] calldata minAmountOuts_
     ) external onlyDedicatedMsgSender {
         require(swapTokens_.length == tickSpacings_.length, "Array length mismatch");
         require(swapTokens_.length == swapDirectToCbBtc_.length, "Direct swap array length mismatch");
+        require(swapTokens_.length == minAmountOuts_.length, "Min amounts array length mismatch");
 
-        _swapTokensToMamoAndCbBtc(swapTokens_, tickSpacings_, swapDirectToCbBtc_);
+        _swapTokensToMamoAndCbBtc(swapTokens_, tickSpacings_, swapDirectToCbBtc_, minAmountOuts_);
 
         uint256 mamoBalance = MAMO_TOKEN.balanceOf(address(this));
         uint256 cbBtcBalance = CBBTC_TOKEN.balanceOf(address(this));
@@ -321,6 +326,7 @@ contract DropAutomation is Ownable {
      * @param swapTokens_ Array of token addresses to swap
      * @param tickSpacings_ Array of tick spacings for each token's pool
      * @param swapDirectToCbBtc_ Array of booleans indicating swap routing for each token
+     * @param minAmountOuts_ Array of minimum output amounts for MEV protection
      * @dev Swaps tokens based on their routing specified by swapDirectToCbBtc_:
      *      - true: Direct swap to cbBTC (e.g., AERO which has no MAMO pool)
      *      - false: Swap to MAMO first, then MAMO to cbBTC
@@ -328,11 +334,13 @@ contract DropAutomation is Ownable {
      *      1. Checks the contract's balance
      *      2. Skips if balance is zero
      *      3. Executes appropriate swap path based on routing flag
+     *      4. Validates final output meets external minimum for MEV protection
      */
     function _swapTokensToMamoAndCbBtc(
         address[] calldata swapTokens_,
         int24[] calldata tickSpacings_,
-        bool[] calldata swapDirectToCbBtc_
+        bool[] calldata swapDirectToCbBtc_,
+        uint256[] calldata minAmountOuts_
     ) internal {
         uint256 length = swapTokens_.length;
         for (uint256 i = 0; i < length; i++) {
@@ -342,14 +350,20 @@ contract DropAutomation is Ownable {
                 continue;
             }
 
+            uint256 finalOutput;
             if (swapDirectToCbBtc_[i]) {
                 // Direct swap to cbBTC (e.g., AERO)
-                uint256 cbBtcReceived = _executeSwap(token, address(CBBTC_TOKEN), amountIn, tickSpacings_[i]);
-                emit TokensSwapped(token, amountIn, cbBtcReceived);
+                finalOutput = _executeSwap(token, address(CBBTC_TOKEN), amountIn, tickSpacings_[i], minAmountOuts_[i]);
+                emit TokensSwapped(token, amountIn, finalOutput);
             } else {
                 // Swap to MAMO first, then MAMO to cbBTC
-                uint256 mamoReceived = _swapToMamo(token, amountIn, tickSpacings_[i]);
-                _swapMamoToCbBtc(mamoReceived);
+                uint256 mamoReceived = _swapToMamo(token, amountIn, tickSpacings_[i], 0);
+                finalOutput = _swapMamoToCbBtc(mamoReceived, 0);
+            }
+
+            // Validate final output meets external minimum
+            if (finalOutput < minAmountOuts_[i]) {
+                revert InsufficientOutput();
             }
         }
     }
@@ -359,25 +373,32 @@ contract DropAutomation is Ownable {
      * @param token Address of the token to swap from
      * @param amountIn Amount of tokens to swap
      * @param tickSpacing Tick spacing for the token's pool with MAMO
+     * @param externalMinAmountOut External minimum for MEV protection (0 to skip)
      * @return amountOut Amount of MAMO tokens received
      * @dev Uses Aerodrome CL router with slippage protection. Emits TokensSwapped event.
      */
-    function _swapToMamo(address token, uint256 amountIn, int24 tickSpacing) internal returns (uint256 amountOut) {
-        amountOut = _executeSwap(token, address(MAMO_TOKEN), amountIn, tickSpacing);
+    function _swapToMamo(address token, uint256 amountIn, int24 tickSpacing, uint256 externalMinAmountOut)
+        internal
+        returns (uint256 amountOut)
+    {
+        amountOut = _executeSwap(token, address(MAMO_TOKEN), amountIn, tickSpacing, externalMinAmountOut);
         emit TokensSwapped(token, amountIn, amountOut);
     }
 
     /**
      * @notice Swaps MAMO tokens to cbBTC
      * @param amountIn Amount of MAMO tokens to swap
+     * @param externalMinAmountOut External minimum for MEV protection (0 to skip)
+     * @return amountOut Amount of cbBTC tokens received
      * @dev Uses Aerodrome CL router with slippage protection.
      *      Uses MAMO_CBBTC_TICK_SPACING (200) for the concentrated liquidity pool.
      *      Emits TokensSwapped event.
      */
-    function _swapMamoToCbBtc(uint256 amountIn) internal {
-        uint256 cbBtcReceived =
-            _executeSwap(address(MAMO_TOKEN), address(CBBTC_TOKEN), amountIn, MAMO_CBBTC_TICK_SPACING);
-        emit TokensSwapped(address(MAMO_TOKEN), amountIn, cbBtcReceived);
+    function _swapMamoToCbBtc(uint256 amountIn, uint256 externalMinAmountOut) internal returns (uint256 amountOut) {
+        amountOut = _executeSwap(
+            address(MAMO_TOKEN), address(CBBTC_TOKEN), amountIn, MAMO_CBBTC_TICK_SPACING, externalMinAmountOut
+        );
+        emit TokensSwapped(address(MAMO_TOKEN), amountIn, amountOut);
     }
 
     /**
@@ -386,19 +407,26 @@ contract DropAutomation is Ownable {
      * @param tokenOut Address of the output token
      * @param amountIn Amount of input tokens to swap
      * @param tickSpacing Tick spacing for the pool
+     * @param externalMinAmountOut External minimum for MEV protection (0 to skip)
      * @return amountOut Amount of output tokens received
-     * @dev Core swap logic with slippage protection.
+     * @dev Core swap logic with dual-layer slippage protection:
+     *      1. On-chain slippage check using quoter (protects against normal volatility)
+     *      2. External minimum check (protects against MEV/manipulation)
      *      Process:
      *      1. Approves the Aerodrome router to spend input tokens
      *      2. Gets a price quote from the Aerodrome quoter
      *      3. Calculates minimum output based on maxSlippageBps tolerance
-     *      4. Executes the swap via exactInputSingle
-     *      5. Verifies the received amount meets the minimum
+     *      4. Uses max(onChainMin, externalMin) as the actual minimum
+     *      5. Executes the swap via exactInputSingle
+     *      6. Verifies the received amount meets the minimum
      */
-    function _executeSwap(address tokenIn, address tokenOut, uint256 amountIn, int24 tickSpacing)
-        internal
-        returns (uint256 amountOut)
-    {
+    function _executeSwap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        int24 tickSpacing,
+        uint256 externalMinAmountOut
+    ) internal returns (uint256 amountOut) {
         require(tickSpacing > 0, "Invalid tick spacing");
 
         IERC20(tokenIn).forceApprove(address(AERODROME_CL_ROUTER), amountIn);
@@ -414,8 +442,12 @@ contract DropAutomation is Ownable {
         (uint256 quotedAmountOut,,,) = AERODROME_QUOTER.quoteExactInputSingle(params);
         require(quotedAmountOut > 0, "Invalid quote");
 
-        uint256 minAmountOut = (quotedAmountOut * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
-        require(minAmountOut > 0, "Slippage too high");
+        // Calculate on-chain minimum based on quote and slippage tolerance
+        uint256 onChainMinAmountOut = (quotedAmountOut * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
+        require(onChainMinAmountOut > 0, "Slippage too high");
+
+        // Use the maximum of on-chain and external minimums for best protection
+        uint256 minAmountOut = externalMinAmountOut > onChainMinAmountOut ? externalMinAmountOut : onChainMinAmountOut;
 
         ISwapRouter.ExactInputSingleParams memory swapParams = ISwapRouter.ExactInputSingleParams({
             tokenIn: tokenIn,
