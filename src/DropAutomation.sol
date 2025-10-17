@@ -68,7 +68,6 @@ contract DropAutomation is Ownable {
     uint256 private constant DEFAULT_SLIPPAGE_BPS = 100; // 1% default slippage
     uint256 private constant SWAP_DEADLINE_BUFFER = 300; // 5 minutes deadline buffer for MEV protection
     int24 private constant MAMO_CBBTC_TICK_SPACING = 200; // Tick spacing for MAMO/cbBTC CL pool
-    int24 private constant AERO_CBBTC_TICK_SPACING = 200; // Tick spacing for AERO/cbBTC CL pool
 
     event DropCreated(uint256 mamoAmount, uint256 cbBtcAmount);
     event DedicatedMsgSenderUpdated(address indexed oldSender, address indexed newSender);
@@ -78,6 +77,8 @@ contract DropAutomation is Ownable {
     event GaugeRemoved(address indexed gauge);
     event GaugeWithdrawn(address indexed gauge, address indexed recipient, uint256 amount);
     event TokensRecovered(address indexed token, address indexed to, uint256 amount);
+    event GaugeRewardsClaimed(address indexed gauge);
+    event GaugeRewardsClaimFailed(address indexed gauge, bytes reason);
 
     error NotDedicatedSender();
     error InvalidSlippage();
@@ -136,15 +137,21 @@ contract DropAutomation is Ownable {
 
     /**
      * @notice Claims rewards from all configured Aerodrome gauges
-     * @dev Only claims rewards without swapping. Call this before createDrop().
-     *      Can be called by anyone. Iterates through all gauges and calls getReward().
+     * @dev Only callable by the dedicated message sender. Only claims rewards without swapping.
+     *      Call this before createDrop(). Iterates through all gauges and calls getReward().
+     *      Uses try/catch to continue claiming from other gauges even if one fails.
+     *      Emits GaugeRewardsClaimed on success and GaugeRewardsClaimFailed on failure.
      */
     function claimGaugeRewards() external onlyDedicatedMsgSender {
         uint256 gaugeCount = aerodromeGauges.length;
         require(gaugeCount > 0, "No gauges configured");
 
         for (uint256 i = 0; i < gaugeCount; i++) {
-            aerodromeGauges[i].getReward(address(this));
+            try aerodromeGauges[i].getReward(address(this)) {
+                emit GaugeRewardsClaimed(address(aerodromeGauges[i]));
+            } catch (bytes memory reason) {
+                emit GaugeRewardsClaimFailed(address(aerodromeGauges[i]), reason);
+            }
         }
     }
 
@@ -338,8 +345,8 @@ contract DropAutomation is Ownable {
 
             if (swapDirectToCbBtc_[i]) {
                 // Direct swap to cbBTC (e.g., AERO)
-                _executeSwap(token, address(CBBTC_TOKEN), amountIn, tickSpacings_[i]);
-                emit TokensSwapped(token, amountIn, CBBTC_TOKEN.balanceOf(address(this)));
+                uint256 cbBtcReceived = _executeSwap(token, address(CBBTC_TOKEN), amountIn, tickSpacings_[i]);
+                emit TokensSwapped(token, amountIn, cbBtcReceived);
             } else {
                 // Swap to MAMO first, then MAMO to cbBTC
                 uint256 mamoReceived = _swapToMamo(token, amountIn, tickSpacings_[i]);
@@ -366,9 +373,12 @@ contract DropAutomation is Ownable {
      * @param amountIn Amount of MAMO tokens to swap
      * @dev Uses Aerodrome CL router with slippage protection.
      *      Uses MAMO_CBBTC_TICK_SPACING (200) for the concentrated liquidity pool.
+     *      Emits TokensSwapped event.
      */
     function _swapMamoToCbBtc(uint256 amountIn) internal {
-        _executeSwap(address(MAMO_TOKEN), address(CBBTC_TOKEN), amountIn, MAMO_CBBTC_TICK_SPACING);
+        uint256 cbBtcReceived =
+            _executeSwap(address(MAMO_TOKEN), address(CBBTC_TOKEN), amountIn, MAMO_CBBTC_TICK_SPACING);
+        emit TokensSwapped(address(MAMO_TOKEN), amountIn, cbBtcReceived);
     }
 
     /**
