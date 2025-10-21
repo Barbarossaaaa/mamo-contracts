@@ -59,8 +59,11 @@ contract DropAutomationIntegrationTest is BaseTest {
 
         // Deploy DropAutomation using the setup script's deploy function
         // Note: The deploy function doesn't add the address to the registry, so we need to do it manually
-        address dropAutomationAddr = setupScript.deployDropAutomation().deploy(addresses);
-        addresses.addAddress("DROP_AUTOMATION", dropAutomationAddr, true);
+        address dropAutomationAddr;
+        if (!addresses.isAddressSet("DROP_AUTOMATION")) {
+            dropAutomationAddr = setupScript.deployDropAutomation().deploy(addresses);
+            addresses.addAddress("DROP_AUTOMATION", dropAutomationAddr, true);
+        }
 
         // Get the deployed contract
         dropAutomation = DropAutomation(addresses.getAddress("DROP_AUTOMATION"));
