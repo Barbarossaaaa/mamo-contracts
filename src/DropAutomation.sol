@@ -139,19 +139,15 @@ contract DropAutomation is Ownable {
      * @notice Claims rewards from all configured Aerodrome gauges
      * @dev Only callable by the dedicated message sender. Only claims rewards without swapping.
      *      Call this before createDrop(). Iterates through all gauges and calls getReward().
-     *      Uses try/catch to continue claiming from other gauges even if one fails.
-     *      Emits GaugeRewardsClaimed on success and GaugeRewardsClaimFailed on failure.
+     *      Emits GaugeRewardsClaimed on success.
      */
     function claimGaugeRewards() external onlyDedicatedMsgSender {
         uint256 gaugeCount = aerodromeGauges.length;
         require(gaugeCount > 0, "No gauges configured");
 
         for (uint256 i = 0; i < gaugeCount; i++) {
-            try aerodromeGauges[i].getReward(address(this)) {
-                emit GaugeRewardsClaimed(address(aerodromeGauges[i]));
-            } catch (bytes memory reason) {
-                emit GaugeRewardsClaimFailed(address(aerodromeGauges[i]), reason);
-            }
+            aerodromeGauges[i].getReward(address(this));
+            emit GaugeRewardsClaimed(address(aerodromeGauges[i]));
         }
     }
 
