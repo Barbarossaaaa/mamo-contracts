@@ -47,8 +47,6 @@ contract DeployDropAutomation is Script {
         address aerodromeRouter = addresses.getAddress("AERODROME_ROUTER");
         address aerodromeQuoter = addresses.getAddress("AERODROME_QUOTER");
         address gauge = addresses.getAddress("AERODROME_USDC_AERO_GAUGE");
-        address aeroToken = addresses.getAddress("AERO");
-        address stakingToken = addresses.getAddress("AERO_STAKING_TOKEN");
 
         // Deploy the DropAutomation
         DropAutomation dropAutomation = new DropAutomation(
@@ -74,8 +72,6 @@ contract DeployDropAutomation is Script {
         console.log("");
         console.log("  Gauge Configuration (to be set by owner post-deployment):");
         console.log("    Gauge:", gauge);
-        console.log("    AERO Token:", aeroToken);
-        console.log("    Staking Token:", stakingToken);
 
         return address(dropAutomation);
     }
