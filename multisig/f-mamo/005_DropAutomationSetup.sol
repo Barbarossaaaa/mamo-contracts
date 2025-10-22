@@ -73,6 +73,13 @@ contract DropAutomationSetup is MultisigProposal {
     }
 
     function deploy() public override {
+        // Check if the drop automation address already exists
+        string memory dropAutomationName = "DROP_AUTOMATION";
+        if (addresses.isAddressSet(dropAutomationName)) {
+            console.log("DROP_AUTOMATION already deployed, skipping deployment");
+            return;
+        }
+
         // Deploy DropAutomation using the deploy script
         address dropAutomationAddress = deployDropAutomation.deploy(addresses);
 
