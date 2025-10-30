@@ -1,0 +1,10 @@
+About this fork : 
+
+This repository is a modified fork of the original project: 
+Created and maintained by Barbarossaaaa
+
+This version exists to:
+* Try out fresh ideas and improvements 
+* Run tests safely without touching the main repo 
+* Explore, learn, and have fun experimenting 
+⚠️ This isn’t an official release — it’s a personalized version made for my own testing and discovery.
